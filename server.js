@@ -14,6 +14,7 @@ const {
 const { renderPage } = require("./lib/page");
 
 const accessTokens = new Map();
+const refreshInflight = new Map();
 
 function securityHeaders(extra = {}) {
   return {
@@ -109,18 +110,45 @@ function forgetAccessToken(sessionId) {
   accessTokens.delete(sessionId);
 }
 
-async function ensureAccessToken(sessionId, config, store, fetchImpl, endpoints) {
+async function refreshStoredToken(sessionId, config, store, fetchImpl, endpoints) {
   const cached = currentAccessToken(sessionId);
   if (cached) return { ok: true, accessToken: cached };
   const stored = store.connectionSecrets(sessionId);
   if (!stored) return { ok: false, error: "disconnected" };
-  const refreshed = await refreshToken(fetchImpl, endpoints, config, stored.refreshToken);
+  const presented = stored.refreshToken;
+  let refreshed;
+  try {
+    refreshed = await refreshToken(fetchImpl, endpoints, config, presented);
+  } catch {
+    return { ok: false, error: "refresh_failed" };
+  }
+  const latest = store.connectionSecrets(sessionId);
+  if (latest && latest.refreshToken !== presented) {
+    const winner = currentAccessToken(sessionId);
+    if (winner) return { ok: true, accessToken: winner };
+    return { ok: false, error: "refresh_failed" };
+  }
   if (!refreshed.ok || typeof refreshed.body.refresh_token !== "string" || typeof refreshed.body.access_token !== "string") {
-    return { ok: false, error: refreshed.error || "refresh_failed", disconnect: refreshed.error === "invalid_grant" };
+    return {
+      ok: false,
+      error: refreshed.error || "refresh_failed",
+      disconnect: refreshed.error === "invalid_grant",
+    };
   }
   store.replaceRefreshToken(sessionId, refreshed.body.refresh_token);
   rememberAccessToken(sessionId, refreshed.body.access_token, refreshed.body.expires_in);
   return { ok: true, accessToken: refreshed.body.access_token };
+}
+
+function ensureAccessToken(sessionId, config, store, fetchImpl, endpoints) {
+  const cached = currentAccessToken(sessionId);
+  if (cached) return Promise.resolve({ ok: true, accessToken: cached });
+  const existing = refreshInflight.get(sessionId);
+  if (existing) return existing;
+  const pending = refreshStoredToken(sessionId, config, store, fetchImpl, endpoints)
+    .finally(() => refreshInflight.delete(sessionId));
+  refreshInflight.set(sessionId, pending);
+  return pending;
 }
 
 function createServer({ config, store, fetchImpl = globalThis.fetch }) {
@@ -168,9 +196,15 @@ function createServer({ config, store, fetchImpl = globalThis.fetch }) {
   async function handleHome(req, res, url) {
     const { session } = sessionFromRequest(req, config);
     if (session && store.publicConnection(session.sid)) {
-      const ready = await endpoints();
-      const access = await ensureAccessToken(session.sid, config, store, fetchImpl, ready);
-      if (!access.ok && access.disconnect) store.deleteConnection(session.sid);
+      try {
+        const ready = await endpoints();
+        if (ready) {
+          const access = await ensureAccessToken(session.sid, config, store, fetchImpl, ready);
+          if (!access.ok && access.disconnect) store.deleteConnection(session.sid);
+        }
+      } catch {
+        console.error("connection_refresh_failed");
+      }
     }
     const connection = session ? store.publicConnection(session.sid) : null;
     const html = renderPage({
@@ -271,11 +305,21 @@ function createServer({ config, store, fetchImpl = globalThis.fetch }) {
     }
     const stored = store.connectionSecrets(session.sid);
     if (!stored) {
+      if (store.publicConnection(session.sid)) store.deleteConnection(session.sid);
       forgetAccessToken(session.sid);
       redirect(res, "/?result=disconnected", cookies);
       return;
     }
-    const ready = await endpoints();
+    let ready;
+    try {
+      ready = await endpoints();
+    } catch {
+      ready = null;
+    }
+    if (!ready) {
+      redirect(res, "/?result=revoke_failed", cookies);
+      return;
+    }
     const revoked = await revokeToken(fetchImpl, ready, config, stored.refreshToken);
     if (!revoked.ok && revoked.error !== "partner_oauth_disabled") {
       redirect(res, "/?result=revoke_failed", cookies);

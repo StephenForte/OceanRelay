@@ -5,6 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { createServer } = require("../server");
+const { COOKIE_NAME, signSession } = require("../lib/session");
 const { loadConfig, publicConfig, DEPLOYED_REDIRECT_URI } = require("../lib/config");
 const { openStore } = require("../lib/store");
 const { createMockRateNinja } = require("./mock-rate-ninja");
@@ -216,6 +217,141 @@ describe("connect flow", () => {
     const page = await fetch(new URL(callback.headers.get("location"), app.base), { headers: { cookie } });
     assert.match(await page.text(), /Customer accounts are denied/);
     assert.equal(mock.calls.filter((call) => call === "POST /oauth/token").length, 1);
+  });
+});
+
+function sessionCookie(sid, csrf) {
+  const value = encodeURIComponent(signSession({ sid, csrf, iat: Date.now() }, SESSION_SECRET));
+  return `${COOKIE_NAME}=${value}`;
+}
+
+describe("bugbot regressions", () => {
+  it("refreshes one shared token when two home loads overlap", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "oceanrelay-race-"));
+    const config = loadConfig({
+      RATE_NINJA_CLIENT_ID: CLIENT_ID,
+      RATE_NINJA_CLIENT_SECRET: CLIENT_SECRET,
+      SESSION_SECRET,
+      TOKEN_ENCRYPTION_KEY: ENCRYPTION_KEY,
+      RATE_NINJA_BASE_URL: "http://127.0.0.1:9",
+      OCEANRELAY_REDIRECT_URI: "http://127.0.0.1:9/oauth/callback",
+    });
+    const store = openStore(path.join(dir, "store.json"), ENCRYPTION_KEY);
+    store.saveConnection("sid-race", {
+      refreshToken: "refresh-old",
+      scopes: ["profile:read"],
+      profile: { name: "SteveF", companyName: "Kings", companyType: "Contract Owner" },
+    });
+    let calls = 0;
+    let release;
+    const gate = new Promise((resolve) => {
+      release = resolve;
+    });
+    const fetchImpl = async (url) => {
+      if (String(url).includes("well-known")) return new Response("no", { status: 404 });
+      calls += 1;
+      await gate;
+      return new Response(JSON.stringify({
+        access_token: "access-new",
+        refresh_token: "refresh-new",
+        expires_in: 600,
+        token_type: "Bearer",
+        scope: "profile:read",
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const server = createServer({ config, store, fetchImpl });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const cookie = sessionCookie("sid-race", "csrf-race");
+    const first = fetch(base, { headers: { cookie } });
+    const second = fetch(base, { headers: { cookie } });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    release();
+    const [left, right] = await Promise.all([first, second]);
+    assert.equal(left.status, 200);
+    assert.equal(right.status, 200);
+    assert.match(await left.text(), /Connected/);
+    assert.match(await right.text(), /Connected/);
+    assert.equal(calls, 1);
+    assert.equal(store.connectionSecrets("sid-race").refreshToken, "refresh-new");
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("renders the home page when Rate Ninja cannot be reached", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "oceanrelay-down-"));
+    const config = loadConfig({
+      RATE_NINJA_CLIENT_ID: CLIENT_ID,
+      RATE_NINJA_CLIENT_SECRET: CLIENT_SECRET,
+      SESSION_SECRET,
+      TOKEN_ENCRYPTION_KEY: ENCRYPTION_KEY,
+      RATE_NINJA_BASE_URL: "http://127.0.0.1:9",
+      OCEANRELAY_REDIRECT_URI: "http://127.0.0.1:9/oauth/callback",
+    });
+    const store = openStore(path.join(dir, "store.json"), ENCRYPTION_KEY);
+    store.saveConnection("sid-down", {
+      refreshToken: "refresh-old",
+      scopes: ["profile:read"],
+      profile: { name: "SteveF", companyName: "Kings", companyType: "Contract Owner" },
+    });
+    const fetchImpl = async () => {
+      throw new Error("connect ECONNREFUSED");
+    };
+    const server = createServer({ config, store, fetchImpl });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const response = await fetch(`http://127.0.0.1:${server.address().port}`, {
+      headers: { cookie: sessionCookie("sid-down", "csrf-down") },
+    });
+    const html = await response.text();
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get("content-type"), /text\/html/);
+    assert.match(html, /Connected/);
+    assert.match(html, /Disconnect/);
+    assert.equal(store.publicConnection("sid-down").profile.name, "SteveF");
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("deletes a connection that can no longer be decrypted", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "oceanrelay-decrypt-"));
+    const file = path.join(dir, "store.json");
+    const config = loadConfig({
+      RATE_NINJA_CLIENT_ID: CLIENT_ID,
+      RATE_NINJA_CLIENT_SECRET: CLIENT_SECRET,
+      SESSION_SECRET,
+      TOKEN_ENCRYPTION_KEY: ENCRYPTION_KEY,
+      RATE_NINJA_BASE_URL: "http://127.0.0.1:9",
+      OCEANRELAY_REDIRECT_URI: "http://127.0.0.1:9/oauth/callback",
+    });
+    const writer = openStore(file, ENCRYPTION_KEY);
+    writer.saveConnection("sid-bad", {
+      refreshToken: "refresh-old",
+      scopes: ["profile:read"],
+      profile: { name: "SteveF", companyName: "Kings", companyType: "Contract Owner" },
+    });
+    const raw = JSON.parse(fs.readFileSync(file, "utf8"));
+    raw.connections["sid-bad"].refreshCiphertext = "v1.not-a-valid-ciphertext";
+    fs.writeFileSync(file, JSON.stringify(raw));
+    const store = openStore(file, ENCRYPTION_KEY);
+    assert.equal(store.connectionSecrets("sid-bad"), null);
+    assert.equal(store.publicConnection("sid-bad").profile.name, "SteveF");
+    const server = createServer({ config, store, fetchImpl: async () => { throw new Error("down"); } });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const csrf = "csrf-bad";
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/disconnect`, {
+      method: "POST",
+      headers: {
+        cookie: sessionCookie("sid-bad", csrf),
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ csrf_token: csrf }),
+      redirect: "manual",
+    });
+    assert.equal(response.status, 302);
+    assert.match(response.headers.get("location"), /disconnected/);
+    assert.equal(store.publicConnection("sid-bad"), null);
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 });
 
