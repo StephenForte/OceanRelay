@@ -13,7 +13,7 @@ Set these on the server. Do not commit the values.
 | `PORT` | yes | Listen port. Render sets this. |
 | `RATE_NINJA_CLIENT_ID` | yes | OAuth client id from the Rate Ninja admin screen. |
 | `RATE_NINJA_CLIENT_SECRET` | yes | Confidential client secret. Stays on the server. |
-| `OCEANRELAY_REDIRECT_URI` | yes | Registered callback. Production value: `https://oceanrelay.onrender.com/oauth/callback`. Local callbacks may be `http://localhost` or `http://127.0.0.1`. |
+| `OCEANRELAY_REDIRECT_URI` | yes | Registered callback. Production value: `https://oceanrelay.ai/oauth/callback`. Local callbacks may be `http://localhost` or `http://127.0.0.1`. |
 | `SESSION_SECRET` | yes | Signs the OceanRelay session cookie. |
 | `TOKEN_ENCRYPTION_KEY` | yes | Encrypts refresh tokens at rest. |
 | `RATE_NINJA_BASE_URL` | no | Defaults to `https://rateninja.co`. |
@@ -27,4 +27,4 @@ Scopes are `profile:read`, `rates:read`, and `sailings:read`. Only a contract-ow
 
 ## Rate Ninja admin
 
-On the OAuth client, save the redirect `https://oceanrelay.onrender.com/oauth/callback`. After that redirect is saved, set `PARTNER_OAUTH_ENABLED=true` on Rate Ninja. Until that flag is on, authorize and token calls return `partner_oauth_disabled`.
+The Rate Ninja OAuth client redirect is `https://oceanrelay.ai/oauth/callback`. If authorize or token calls return `partner_oauth_disabled`, partner login is turned off on Rate Ninja.
