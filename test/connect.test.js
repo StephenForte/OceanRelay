@@ -77,7 +77,16 @@ describe("configuration check", () => {
       OCEANRELAY_REDIRECT_URI: DEPLOYED_REDIRECT_URI,
     });
     assert.equal(deployed.ok, true);
+    assert.equal(deployed.redirectUri, "https://oceanrelay.ai/oauth/callback");
     assert.equal(deployed.issuer, "https://rateninja.co");
+    const otherPort = loadConfig({
+      RATE_NINJA_CLIENT_ID: CLIENT_ID,
+      RATE_NINJA_CLIENT_SECRET: CLIENT_SECRET,
+      SESSION_SECRET,
+      TOKEN_ENCRYPTION_KEY: ENCRYPTION_KEY,
+      OCEANRELAY_REDIRECT_URI: "https://oceanrelay.ai:8443/oauth/callback",
+    });
+    assert.equal(otherPort.ok, false);
   });
 });
 
