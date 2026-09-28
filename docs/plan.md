@@ -95,14 +95,14 @@ Status values: `ready` (prompt written, can dispatch), `blocked-on <x>`, `dispat
 | Id | Task | Owns | Shared, additive only | Off-limits | Model | Status |
 | --- | --- | --- | --- | --- | --- | --- |
 | T1 | Router split, identity hardening (D-2), records store (C-1, C-2, M-1), test glob | `server.js`, `lib/router.js` (new), `lib/routes/*.js` (new), `lib/records.js` (new), `lib/config.js`, `lib/page.js`, `package.json`, `README.md`, `.env.example`, `test/connect.test.js`, `test/records.test.js` (new), `test/identity.test.js` (new) | `test/mock-rate-ninja.js` | `lib/rate-ninja.js` (T2), `lib/offer-domain.js` (T3), `lib/store.js` token format | strongest | merged `1a82731` 2026-09-28, PR #6 (review in §6) |
-| T2 | Rate Ninja partner reads client (C-3) | `lib/rate-ninja.js` (add functions only), `test/partner-reads.test.js` (new) | `test/mock-rate-ninja.js` | `server.js`, `lib/routes/*` (T1), everything else | mid | approved 2026-09-28 after one fix round, PR #10 at `ac45bf8` (review in §6) |
-| T3 | Offer domain: validation, pricing, snapshot, canonical terms, buyer view, status rules (C-4) | `lib/offer-domain.js` (new), `test/offer-domain.test.js` (new) | none | everything else | strong | approved 2026-09-28, PR #9 at `d936b0a` (review in §6) |
+| T2 | Rate Ninja partner reads client (C-3) | `lib/rate-ninja.js` (add functions only), `test/partner-reads.test.js` (new) | `test/mock-rate-ninja.js` | `server.js`, `lib/routes/*` (T1), everything else | mid | merged `923c473` 2026-09-28, PR #10 at `ac45bf8` (review in §6) |
+| T3 | Offer domain: validation, pricing, snapshot, canonical terms, buyer view, status rules (C-4) | `lib/offer-domain.js` (new), `test/offer-domain.test.js` (new) | none | everything else | strong | merged `c7b1121` 2026-09-28, PR #9 at `d936b0a` (review in §6) |
 
 ### Wave B — Phase 3 (blocked on T1, T2, T3 merged)
 
 | Id | Task | Owns | Model | Status |
 | --- | --- | --- | --- | --- |
-| T4 | Offer draft + preview, rate-based and manual; source-rate change/expiry warning. **Also carries F-1, F-2, F-4, F-5** (§6). | `lib/routes/offers.js`, `lib/views/offers.js`, offer methods in `lib/records.js`, `test/offers.test.js` | strong | blocked-on T1, T2, T3 |
+| T4 | Offer draft + preview, rate-based and manual; source-rate change/expiry warning. **Also carries F-1, F-2, F-4, F-5** (§6). | `lib/routes/offers.js`, `lib/views/offers.js`, offer methods in `lib/records.js`, `test/offers.test.js` | strong | ready — `docs/prompts/T4-offer-drafts.md` (publishes C-5; uses D-11, D-12) |
 | A-3 | **Phase 3 acceptance (operator, deployed):** owner with rates saves and previews an offer from a rate; owner with no rates saves and previews a manual offer; both previews say quantity is the seller's claim. Requires O-1, O-2, O-4(b). | — | — | blocked-on T4 |
 
 T4's prompt is written when Wave A has merged, against the contracts as merged, not as
