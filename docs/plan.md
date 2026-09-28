@@ -95,7 +95,7 @@ Status values: `ready` (prompt written, can dispatch), `blocked-on <x>`, `dispat
 | Id | Task | Owns | Shared, additive only | Off-limits | Model | Status |
 | --- | --- | --- | --- | --- | --- | --- |
 | T1 | Router split, identity hardening (D-2), records store (C-1, C-2, M-1), test glob | `server.js`, `lib/router.js` (new), `lib/routes/*.js` (new), `lib/records.js` (new), `lib/config.js`, `lib/page.js`, `package.json`, `README.md`, `.env.example`, `test/connect.test.js`, `test/records.test.js` (new), `test/identity.test.js` (new) | `test/mock-rate-ninja.js` | `lib/rate-ninja.js` (T2), `lib/offer-domain.js` (T3), `lib/store.js` token format | strongest | merged `1a82731` 2026-09-28, PR #6 (review in §6) |
-| T2 | Rate Ninja partner reads client (C-3) | `lib/rate-ninja.js` (add functions only), `test/partner-reads.test.js` (new) | `test/mock-rate-ninja.js` | `server.js`, `lib/routes/*` (T1), everything else | mid | changes requested 2026-09-28, PR #10 at `007b597` (review in §6) |
+| T2 | Rate Ninja partner reads client (C-3) | `lib/rate-ninja.js` (add functions only), `test/partner-reads.test.js` (new) | `test/mock-rate-ninja.js` | `server.js`, `lib/routes/*` (T1), everything else | mid | approved 2026-09-28 after one fix round, PR #10 at `ac45bf8` (review in §6) |
 | T3 | Offer domain: validation, pricing, snapshot, canonical terms, buyer view, status rules (C-4) | `lib/offer-domain.js` (new), `test/offer-domain.test.js` (new) | none | everything else | strong | approved 2026-09-28, PR #9 at `d936b0a` (review in §6) |
 
 ### Wave B — Phase 3 (blocked on T1, T2, T3 merged)
@@ -231,7 +231,7 @@ Follow-ups opened:
   150000. Copying it straight across under-prices exponent-2 currencies by 100×. T4 also
   converts form strings to numbers, because `validateDraft` rejects numeric strings.
 
-### T2 — PR #10, `007b597`, changes requested 2026-09-28
+### T2 — PR #10, first round `007b597` changes requested; `ac45bf8` approved 2026-09-28
 
 Verified by the planner:
 
@@ -276,3 +276,19 @@ Non-blocking:
   sailings is enough schedule context.
 - The worker also caught a planner error: §1's sailing DTO list omitted `source`,
   `allocationEvidence` and `capacityQuantity`. Corrected above.
+
+**T2 second round, `ac45bf8` (fix `6e8441d` plus a merge of `main` at `ce741c0`), approved:**
+
+- Base is now current `main`. Scope unchanged (same 3 files). No lines removed from
+  `test/partner-reads.test.js` relative to the first round.
+- Gate re-run: `node --check` 3/3; `npm test` 82/0/0 (64 on `main` + 18 T2).
+- The same probe that failed on `007b597` now passes: HTML 401 → `unauthorized`,
+  HTML 429 → `rate_limited`, HTML 403 → `forbidden` (no `detail`), HTML 404 →
+  `not_found`, 502 → `bad_response`, JSON 403 `partner_oauth_disabled` → `forbidden` with
+  `detail`, and a 200 with a non-JSON body or wrong `data` shape → `bad_response`.
+- `getRate`/`getSailing` with `.` or `..` → `not_found` and **no request made**. `a/b`
+  still goes to the encoded path. F-5 stays on T4: form ids still need a strict pattern,
+  because the client only rejects dot segments.
+- Process note: the worker's PR comment first cited an unpushed commit (`36867cc`), then
+  corrected it to `6e8441d` a few seconds later. Verified against the branch, not the
+  comment.
