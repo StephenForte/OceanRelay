@@ -102,6 +102,23 @@ that relies on refresh after the 10-minute access token expires.
 
 ---
 
+### D-11 — A rate-based offer's base price comes from Rate Ninja and cannot be typed over (2026-09-28)
+
+For `source: rn_rate`, `baseMinor` is the chosen equipment column from a rate OceanRelay
+fetched **server-side at save time**, converted to minor units with the seller-confirmed
+currency's exponent (D-5; for example 1500 USD becomes 150000). The form never carries the
+base price or the snapshot as trusted input. The seller may override origin, destination,
+and operating carrier; each override is recorded in `overriddenFields` so the preview can
+show "from Rate Ninja" versus "typed by seller". A seller who wants a different base price
+uses a manual offer. This keeps the label "from Rate Ninja" true.
+
+### D-12 — Offer ids are random and other companies' offers are "not found" (2026-09-28)
+
+Offer ids are `crypto.randomUUID()`. A request for an offer that belongs to another
+company returns the same 404 as an id that does not exist, so ids cannot be probed for
+existence. This applies to every offer route until Phase 4 introduces published,
+buyer-visible offers (T5), which get their own read path through `buyerView`.
+
 ## Interface contracts
 
 A contract is the surface other tasks build on. The task named as owner publishes it; later
@@ -156,3 +173,27 @@ As merged in T3, C-4 also exports `sourceWarnings`, `SELLER_CLAIM_CAVEAT`,
 `CARRIER_CONFIRMED_CAVEAT`, `CAPACITY_CAVEATS`, `LIMITS`, `SOURCES`, `EQUIPMENT`, `UNITS`.
 The field set hashed by `canonicalTerms` v1 is listed in the comment above that function in
 `lib/offer-domain.js`. Whether acceptances use it is open (plan §6, F-3).
+
+### C-5 — Offer record (owner: T4)
+
+Stored in `records.offers[id]` (schema v1, no migration: `offers` already exists).
+
+```
+{
+  id, companyId, createdBy (sub), createdAt (ISO),
+  state: "draft",
+  source: "rn_rate" | "manual",
+  terms: <validateDraft value, plus buyerMinor>,
+  snapshot: <snapshotFromRate result> | null,
+  sourceRecordId: <rate id> | null,
+  overriddenFields: [..],
+  capacityStatus: "seller_asserted" | "carrier_pending" | "carrier_confirmed",
+  statusHistory: [{ from, to, actor (sub), at (ISO) }]
+}
+```
+
+`lib/records.js` methods added by T4, all synchronous through `transact`:
+`createOffer(identity, fields)`, `listCompanyOffers(companyId)`,
+`getCompanyOffer(companyId, id)` (null for another company's offer),
+`setCapacityStatus(companyId, id, to, actorSub)` (checks `canChangeCapacityStatus`
+inside the transaction). T5 adds versions (migration M-2) on top of this shape.
