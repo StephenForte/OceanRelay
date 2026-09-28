@@ -102,7 +102,7 @@ Status values: `ready` (prompt written, can dispatch), `blocked-on <x>`, `dispat
 
 | Id | Task | Owns | Model | Status |
 | --- | --- | --- | --- | --- |
-| T4 | Offer draft + preview, rate-based and manual; source-rate change/expiry warning. **Also carries F-1, F-2, F-4, F-5** (§6). | `lib/routes/offers.js`, `lib/views/offers.js`, offer methods in `lib/records.js`, `test/offers.test.js` | strong | changes requested 2026-09-28, PR #14 at `ef4a4e1` (review in §6) |
+| T4 | Offer draft + preview, rate-based and manual; source-rate change/expiry warning. **Also carries F-1, F-2, F-4, F-5** (§6). | `lib/routes/offers.js`, `lib/views/offers.js`, offer methods in `lib/records.js`, `test/offers.test.js` | strong | approved 2026-09-28 after one fix round, PR #14 at `40278e5` (review in §6) |
 | A-3 | **Phase 3 acceptance (operator, deployed):** owner with rates saves and previews an offer from a rate; owner with no rates saves and previews a manual offer; both previews say quantity is the seller's claim. Requires O-1, O-2, O-4(b). | — | — | blocked-on T4 |
 
 T4's prompt is written when Wave A has merged, against the contracts as merged, not as
@@ -302,7 +302,7 @@ all return ok and request the encoded path; only `.` and `..` return `not_found`
 a request. This is a false positive, not a stale finding: the code it describes is
 unchanged on `main`. The thread was answered and resolved on PR #10. No code change.
 
-### T4 — PR #14, `ef4a4e1`, changes requested 2026-09-28
+### T4 — PR #14, first round `ef4a4e1` changes requested; `40278e5` approved 2026-09-28
 
 Verified by the planner:
 
@@ -354,3 +354,18 @@ Follow-ups opened:
 - **F-7 (T5 or later, UX):** when the save-time Rate Ninja fetch fails, the seller is
   sent to the chooser and loses everything typed. Re-render the form with the values
   and the error instead.
+
+**T4 second round, `40278e5` (test-only commit), approved:**
+
+- Base still `1291c1f` = `origin/main`. The commit touches only `test/offers.test.js`
+  (+84, no removed lines).
+- Gate re-run: `node --check`; `npm test` 100/0/0 (82 + 18).
+- The new test injects `<img src=x onerror=alert(1)>` through Rate Ninja carrier, notes
+  and vessel, and through seller code-share name, service terms and operating carrier. It
+  asserts the raw payload is absent **and** the escaped form is present on the chooser,
+  form (including the re-rendered error form), preview and list, and that notes stay off
+  the buyer panel and the list.
+- **Proven able to fail:** with `escapeHtml` stubbed to identity, `npm test` gives
+  99 pass / 1 fail ("chooser rendered raw markup"). Restored, it is 100/0.
+- The worker put its response in the PR description, not a comment. It matches the
+  branch.
