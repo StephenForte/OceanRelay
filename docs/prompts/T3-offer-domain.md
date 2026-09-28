@@ -85,8 +85,8 @@ Nothing existing. This is a new module.
 
 - **Owned:** `lib/offer-domain.js` (new), `test/offer-domain.test.js` (new).
 - **Shared:** none.
-- **Off-limits:** everything else, including `test/mock-rate-ninja.js` (T1 and T2 are
-  editing it), `package.json` (T1), all of `docs/`.
+- **Off-limits:** everything else, including `test/mock-rate-ninja.js` (T2 is
+  editing it), `package.json`, all of `docs/`.
 
 If you need to change an off-limits file, stop and report.
 
@@ -126,9 +126,10 @@ field can change a capacity status.
 ## Gate
 
 Run at handoff time, after rebasing onto current `main`; a run against an older base does
-not count. `node --check` on every changed `.js` file, then `node --test "test/*.test.js"`
-(until T1 merges, `npm test` only runs `test/connect.test.js`, so it would skip your
-tests). All passing, 0 skipped. Report the count before and after; unexplained movement
+not count. `node --check` on every changed `.js` file, then `npm test` (it now runs
+every `test/*.test.js` file). Current `main` has 27 tests, all passing; if T2 merges
+first the baseline moves, so report the count on the `main` you rebased onto. All
+passing, 0 skipped. Report the count before and after; unexplained movement
 is a finding. No runtime dependencies (D-9).
 
 ## Disagree if needed
@@ -148,7 +149,7 @@ BRANCH:      task/T3-offer-domain
 PR:          <url>
 STATUS:      complete | complete-with-caveats | blocked
 
-GATE:        node --check ✅   node --test "test/*.test.js": <N> passed, <N> failed, <N> skipped
+GATE:        node --check ✅   npm test: <N> passed, <N> failed, <N> skipped
              base: main at <sha> (rebased at handoff time)
              tests on main before: <N>   after: <N>   difference explained: <yes/why>
 MIGRATION:   none
@@ -176,4 +177,4 @@ EXISTING TESTS MODIFIED lets the reviewer judge strengthening versus weakening w
 hunting for the change. RISKS AND FOLLOW-UPS is where an honest gap gets checked instead
 of becoming an incident.
 
-/goal T3 is done when branch `task/T3-offer-domain`, rebased on current `main`, passes `node --check` and `node --test "test/*.test.js"` with every test listed above present (including the `buyerView` allowlist test with an unknown field), only `lib/offer-domain.js` and `test/offer-domain.test.js` are changed, and a draft PR exists whose description holds the filled-in handoff block.
+/goal T3 is done when branch `task/T3-offer-domain`, rebased on current `main`, passes `node --check` and `npm test` with every test listed above present (including the `buyerView` allowlist test with an unknown field), only `lib/offer-domain.js` and `test/offer-domain.test.js` are changed, and a draft PR exists whose description holds the filled-in handoff block.

@@ -88,15 +88,15 @@ Status values: `ready` (prompt written, can dispatch), `blocked-on <x>`, `dispat
 | O-3 | Refused company: a Freight Forwarder/Customer account attempts Connect and sees the contract-owner-only message. | open |
 | O-4 | **Provision test accounts on Rate Ninja** now, because Phases 3–4 cannot be accepted without them: (a) contract owner with rates — exists; (b) contract owner with no rates; (c) a second contract owner at a **different company** (Phase 4 buyer); (d) a customer-company account for O-3. | open |
 | O-5 | Confirm the Node version the Render service runs (Render dashboard or `NODE_VERSION` env). Needs ≥ 20.12. | open |
-| O-6 | **Before merging PR #6:** set `OCEANRELAY_RECORDS_PATH=/var/data/oceanrelay-records.json` on the Render service, the same persistent disk as the token store. The default `data/oceanrelay-records.json` is on Render's ephemeral filesystem, so offers written there would vanish on the next deploy. | open |
+| O-6 | **Done 2026-09-28 (operator verified /config).** Before merging PR #6: set `OCEANRELAY_RECORDS_PATH=/var/data/oceanrelay-records.json` on the Render service, the same persistent disk as the token store. The default `data/oceanrelay-records.json` is on Render's ephemeral filesystem, so offers written there would vanish on the next deploy. | done |
 
 ### Wave A — foundations (dispatch all three now, in parallel)
 
 | Id | Task | Owns | Shared, additive only | Off-limits | Model | Status |
 | --- | --- | --- | --- | --- | --- | --- |
-| T1 | Router split, identity hardening (D-2), records store (C-1, C-2, M-1), test glob | `server.js`, `lib/router.js` (new), `lib/routes/*.js` (new), `lib/records.js` (new), `lib/config.js`, `lib/page.js`, `package.json`, `README.md`, `.env.example`, `test/connect.test.js`, `test/records.test.js` (new), `test/identity.test.js` (new) | `test/mock-rate-ninja.js` | `lib/rate-ninja.js` (T2), `lib/offer-domain.js` (T3), `lib/store.js` token format | strongest | approved 2026-09-28, PR #6 at `45a3d34` (review in §6) |
-| T2 | Rate Ninja partner reads client (C-3) | `lib/rate-ninja.js` (add functions only), `test/partner-reads.test.js` (new) | `test/mock-rate-ninja.js` | `server.js`, `lib/routes/*` (T1), everything else | mid | ready — `docs/prompts/T2-partner-reads.md` |
-| T3 | Offer domain: validation, pricing, snapshot, canonical terms, buyer view, status rules (C-4) | `lib/offer-domain.js` (new), `test/offer-domain.test.js` (new) | none | everything else | strong | ready — `docs/prompts/T3-offer-domain.md` |
+| T1 | Router split, identity hardening (D-2), records store (C-1, C-2, M-1), test glob | `server.js`, `lib/router.js` (new), `lib/routes/*.js` (new), `lib/records.js` (new), `lib/config.js`, `lib/page.js`, `package.json`, `README.md`, `.env.example`, `test/connect.test.js`, `test/records.test.js` (new), `test/identity.test.js` (new) | `test/mock-rate-ninja.js` | `lib/rate-ninja.js` (T2), `lib/offer-domain.js` (T3), `lib/store.js` token format | strongest | merged `1a82731` 2026-09-28, PR #6 (review in §6) |
+| T2 | Rate Ninja partner reads client (C-3) | `lib/rate-ninja.js` (add functions only), `test/partner-reads.test.js` (new) | `test/mock-rate-ninja.js` | `server.js`, `lib/routes/*` (T1), everything else | mid | ready (prompt refreshed for post-T1 main 2026-09-28) — `docs/prompts/T2-partner-reads.md` |
+| T3 | Offer domain: validation, pricing, snapshot, canonical terms, buyer view, status rules (C-4) | `lib/offer-domain.js` (new), `test/offer-domain.test.js` (new) | none | everything else | strong | ready (prompt refreshed for post-T1 main 2026-09-28) — `docs/prompts/T3-offer-domain.md` |
 
 ### Wave B — Phase 3 (blocked on T1, T2, T3 merged)
 
