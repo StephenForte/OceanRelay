@@ -88,12 +88,13 @@ Status values: `ready` (prompt written, can dispatch), `blocked-on <x>`, `dispat
 | O-3 | Refused company: a Freight Forwarder/Customer account attempts Connect and sees the contract-owner-only message. | open |
 | O-4 | **Provision test accounts on Rate Ninja** now, because Phases 3–4 cannot be accepted without them: (a) contract owner with rates — exists; (b) contract owner with no rates; (c) a second contract owner at a **different company** (Phase 4 buyer); (d) a customer-company account for O-3. | open |
 | O-5 | Confirm the Node version the Render service runs (Render dashboard or `NODE_VERSION` env). Needs ≥ 20.12. | open |
+| O-6 | **Before merging PR #6:** set `OCEANRELAY_RECORDS_PATH=/var/data/oceanrelay-records.json` on the Render service, the same persistent disk as the token store. The default `data/oceanrelay-records.json` is on Render's ephemeral filesystem, so offers written there would vanish on the next deploy. | open |
 
 ### Wave A — foundations (dispatch all three now, in parallel)
 
 | Id | Task | Owns | Shared, additive only | Off-limits | Model | Status |
 | --- | --- | --- | --- | --- | --- | --- |
-| T1 | Router split, identity hardening (D-2), records store (C-1, C-2, M-1), test glob | `server.js`, `lib/router.js` (new), `lib/routes/*.js` (new), `lib/records.js` (new), `lib/config.js`, `lib/page.js`, `package.json`, `README.md`, `.env.example`, `test/connect.test.js`, `test/records.test.js` (new), `test/identity.test.js` (new) | `test/mock-rate-ninja.js` | `lib/rate-ninja.js` (T2), `lib/offer-domain.js` (T3), `lib/store.js` token format | strongest | ready — `docs/prompts/T1-foundation.md` |
+| T1 | Router split, identity hardening (D-2), records store (C-1, C-2, M-1), test glob | `server.js`, `lib/router.js` (new), `lib/routes/*.js` (new), `lib/records.js` (new), `lib/config.js`, `lib/page.js`, `package.json`, `README.md`, `.env.example`, `test/connect.test.js`, `test/records.test.js` (new), `test/identity.test.js` (new) | `test/mock-rate-ninja.js` | `lib/rate-ninja.js` (T2), `lib/offer-domain.js` (T3), `lib/store.js` token format | strongest | approved 2026-09-28, PR #6 at `45a3d34` (review in §6) |
 | T2 | Rate Ninja partner reads client (C-3) | `lib/rate-ninja.js` (add functions only), `test/partner-reads.test.js` (new) | `test/mock-rate-ninja.js` | `server.js`, `lib/routes/*` (T1), everything else | mid | ready — `docs/prompts/T2-partner-reads.md` |
 | T3 | Offer domain: validation, pricing, snapshot, canonical terms, buyer view, status rules (C-4) | `lib/offer-domain.js` (new), `test/offer-domain.test.js` (new) | none | everything else | strong | ready — `docs/prompts/T3-offer-domain.md` |
 
@@ -101,7 +102,7 @@ Status values: `ready` (prompt written, can dispatch), `blocked-on <x>`, `dispat
 
 | Id | Task | Owns | Model | Status |
 | --- | --- | --- | --- | --- |
-| T4 | Offer draft + preview, rate-based and manual; source-rate change/expiry warning | `lib/routes/offers.js`, `lib/views/offers.js`, offer methods in `lib/records.js`, `test/offers.test.js` | strong | blocked-on T1, T2, T3 |
+| T4 | Offer draft + preview, rate-based and manual; source-rate change/expiry warning. **Also carries F-1** (§6). | `lib/routes/offers.js`, `lib/views/offers.js`, offer methods in `lib/records.js`, `test/offers.test.js` | strong | blocked-on T1, T2, T3 |
 | A-3 | **Phase 3 acceptance (operator, deployed):** owner with rates saves and previews an offer from a rate; owner with no rates saves and previews a manual offer; both previews say quantity is the seller's claim. Requires O-1, O-2, O-4(b). | — | — | blocked-on T4 |
 
 T4's prompt is written when Wave A has merged, against the contracts as merged, not as
@@ -131,7 +132,7 @@ requires one). Collect these from the operator before planning. Phase 6 is opera
 
 ## 4. Integration order and expected conflicts
 
-Merge order for Wave A: **T3, then T2, then T1.**
+Merge order for Wave A: planned **T3, then T2, then T1**; in practice T1 finished first (2026-09-28), so T1 merges first and T2/T3 rebase onto it. T2 will hit the mock conflict described below.
 
 - T3 touches nothing shared. Merges clean.
 - T2 and T1 both append to `test/mock-rate-ninja.js`. Expect a conflict where each adds
@@ -151,3 +152,40 @@ Wave B has one task; no conflicts expected.
 2. ForteL2 Sepolia RPC and contract-deployment process (Phase 5). Not blocking yet.
 3. Does the Rate Ninja client still show the name "Capacity Exchange"? The partner PRD
    step 1 says rename it; the README says it may still carry that name. Cosmetic.
+
+---
+
+## 6. Review log
+
+### T1 — PR #6, `45a3d34`, approved 2026-09-28
+
+Verified by the planner, not taken from the handoff:
+
+- Base: `git merge-base origin/main origin/task/T1-foundation` = `7fa9fd3` = `origin/main`.
+- Scope: no off-limits path in the diff (`lib/rate-ninja.js`, `lib/offer-domain.js`,
+  `lib/store.js`, `docs/`). Mock change is additive; default profile unchanged.
+- Gate re-run in a clean worktree: `node --check` on all 11 changed `.js` files; `npm test`
+  27 pass / 0 fail / 0 skip (8 before, +19 new; matches the handoff).
+- Repro script: `/?result=identity_unavailable`, stored profile `undefined`, 1 revoke call.
+- `test/connect.test.js`: no removed lines, so no existing assertion changed.
+- Probes (scratch dir, deleted afterwards):
+  - A `transact` that mutates then throws leaves the file byte-identical and the in-memory
+    state unchanged.
+  - A plain (non-async) function returning a Promise is rejected, with the file unchanged.
+  - Populated v1 file (offers + audit) survives reopen: M-1 forward on populated data.
+  - Legacy empty-profile connection: `GET /` still renders **Connected** and keeps the row.
+    The worker disclosed this in the handoff. Confirmed their reason: the existing fixtures at
+    `test/connect.test.js:252,304,339` have no `sub`/`companyId` and assert Connected, so
+    changing `/` would have meant rewriting existing tests.
+
+Follow-ups opened:
+
+- **F-1 (goes to T4):** `GET /` must use the same identity check as `requireIdentity`:
+  show Disconnected for an identity-less connection, delete the row, and **revoke** its
+  refresh token (today `requireIdentity` deletes without revoking, leaving a token live at
+  Rate Ninja for up to 30 days). Update the three fixtures above to carry `sub` and
+  `companyId`; that is a strengthening, not a weakening, and T4's handoff must list it.
+- **F-2 (note for T4):** `createServer` falls back to a memory-only records store when
+  `records` is omitted. `main()` passes it, but T4's tests must pass a file-backed store
+  wherever persistence is asserted.
+- **O-6** above.
