@@ -292,3 +292,12 @@ Non-blocking:
 - Process note: the worker's PR comment first cited an unpushed commit (`36867cc`), then
   corrected it to `6e8441d` a few seconds later. Verified against the branch, not the
   comment.
+
+**T2 post-merge bot finding (Cursor Bugbot on `ac45bf8`, 2026-09-28): false positive.**
+Bugbot claimed the dot-segment guard in `partnerItemUrl` rejects ids containing `:`, `@`,
+`+`, `&` or `=`, because "the URL serializer decodes characters that are legal in a
+path". The WHATWG URL parser does not decode percent-escapes in `pathname`. Probed on
+`main` with a fake `fetchImpl`: `abc:1`, `a@b`, `a+b`, `a&b`, `a=b`, `a b`, `a/b` and `a%b`
+all return ok and request the encoded path; only `.` and `..` return `not_found` without
+a request. This is a false positive, not a stale finding: the code it describes is
+unchanged on `main`. The thread was answered and resolved on PR #10. No code change.
