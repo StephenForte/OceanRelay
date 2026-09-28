@@ -257,6 +257,53 @@ describe("partner reads", () => {
     });
   });
 
+  it("maps HTML 401, 403, 404, and 429 from the status without reading a JSON body", async () => {
+    const config = { issuer: "http://127.0.0.1:9" };
+    const cases = [
+      [401, "unauthorized"],
+      [403, "forbidden"],
+      [404, "not_found"],
+      [429, "rate_limited"],
+    ];
+    for (const [status, error] of cases) {
+      let reads = 0;
+      const fetchImpl = async () => {
+        const response = new Response("<html><body>gateway</body></html>", {
+          status,
+          headers: { "content-type": "text/html" },
+        });
+        const json = response.json.bind(response);
+        response.json = async () => {
+          reads += 1;
+          return json();
+        };
+        return response;
+      };
+      const result = await listRates(fetchImpl, config, "access-token", { page: 1, pageSize: 100 });
+      assert.equal(result.ok, false);
+      assert.equal(result.status, status);
+      assert.equal(result.error, error);
+      assert.equal(result.detail, undefined);
+      assert.equal(reads, status === 403 ? 1 : 0);
+    }
+  });
+
+  it("returns not_found for dot ids without sending a request", async () => {
+    const fetchImpl = async () => {
+      throw new Error("should not fetch");
+    };
+    const config = { issuer: "http://127.0.0.1:9" };
+    for (const id of [".", ".."]) {
+      const rate = await getRate(fetchImpl, config, "access-token", id);
+      const sailing = await getSailing(fetchImpl, config, "access-token", id);
+      assert.equal(rate.ok, false);
+      assert.equal(rate.status, 404);
+      assert.equal(rate.error, "not_found");
+      assert.equal(sailing.status, 404);
+      assert.equal(sailing.error, "not_found");
+    }
+  });
+
   it("maps a non-JSON body, missing data, and the wrong data type to bad_response", async () => {
     await withMock({ rates: [sampleRate("kings-rate")] }, async ({ mock, config, accessToken }) => {
       mock.failNextPartner("non-json");
