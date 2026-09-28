@@ -1,10 +1,16 @@
 const http = require("node:http");
 const crypto = require("node:crypto");
 
-function createMockRateNinja({ clientId, clientSecret, userinfo } = {}) {
+function createMockRateNinja({ clientId, clientSecret, userinfo, rates, sailings } = {}) {
   const codes = new Map();
   const refreshTokens = new Map();
   const calls = [];
+  // T2 partner reads. `calls` stays a method+path string list for existing tests.
+  const requests = [];
+  const accessTokens = new Set();
+  const rateRows = Array.isArray(rates) ? rates : [];
+  const sailingRows = Array.isArray(sailings) ? sailings : [];
+  let nextPartnerFault = null;
 
   function profile() {
     return {
@@ -20,6 +26,12 @@ function createMockRateNinja({ clientId, clientSecret, userinfo } = {}) {
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url || "/", "http://127.0.0.1");
     calls.push(`${req.method} ${url.pathname}`);
+    requests.push({
+      method: req.method,
+      url: req.url || "",
+      pathname: url.pathname,
+      headers: Object.assign({}, req.headers),
+    });
     if (req.method === "GET" && url.pathname === "/.well-known/oauth-authorization-server") {
       const origin = `http://127.0.0.1:${server.address().port}`;
       const body = JSON.stringify({
@@ -135,6 +147,10 @@ function createMockRateNinja({ clientId, clientSecret, userinfo } = {}) {
       res.end(JSON.stringify(profile()));
       return;
     }
+    if (req.method === "GET" && url.pathname.startsWith("/api/partner/v1/me/")) {
+      handlePartnerRead(req, res, url);
+      return;
+    }
     if (url.pathname.startsWith("/api/v1/")) {
       res.writeHead(500, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: "demo_api_called" }));
@@ -147,6 +163,7 @@ function createMockRateNinja({ clientId, clientSecret, userinfo } = {}) {
   function issue() {
     const access = `access-${crypto.randomBytes(8).toString("base64url")}`;
     const refresh = `refresh-${crypto.randomBytes(8).toString("base64url")}`;
+    accessTokens.add(access);
     refreshTokens.set(refresh, true);
     return {
       access_token: access,
@@ -157,10 +174,46 @@ function createMockRateNinja({ clientId, clientSecret, userinfo } = {}) {
     };
   }
 
+  function handlePartnerRead(req, res, url) {
+    if (nextPartnerFault != null) {
+      const fault = nextPartnerFault;
+      nextPartnerFault = null;
+      sendPartnerFault(res, fault);
+      return;
+    }
+    const header = req.headers.authorization || "";
+    const match = /^Bearer\s+(\S+)$/i.exec(header);
+    const token = match ? match[1] : "";
+    if (!accessTokens.has(token)) {
+      writeJson(res, 401, { error: "invalid_token" });
+      return;
+    }
+    if (url.pathname === "/api/partner/v1/me/rates") {
+      writeJson(res, 200, partnerPage(rateRows, url.searchParams));
+      return;
+    }
+    if (url.pathname === "/api/partner/v1/me/sailings") {
+      writeJson(res, 200, partnerPage(sailingRows, url.searchParams));
+      return;
+    }
+    const rateMatch = url.pathname.match(/^\/api\/partner\/v1\/me\/rates\/([^/]+)$/);
+    if (rateMatch) {
+      writePartnerItem(res, rateRows, rateMatch[1], "Rate not found.");
+      return;
+    }
+    const sailingMatch = url.pathname.match(/^\/api\/partner\/v1\/me\/sailings\/([^/]+)$/);
+    if (sailingMatch) {
+      writePartnerItem(res, sailingRows, sailingMatch[1], "Sailing not found.");
+      return;
+    }
+    writeJson(res, 404, { error: "not_found" });
+  }
+
   return {
     server,
     calls,
     refreshTokens,
+    requests,
     listen() {
       return new Promise((resolve) => {
         server.listen(0, "127.0.0.1", () => resolve(server.address().port));
@@ -168,6 +221,12 @@ function createMockRateNinja({ clientId, clientSecret, userinfo } = {}) {
     },
     close() {
       return new Promise((resolve) => server.close(resolve));
+    },
+    issueAccessToken() {
+      return issue().access_token;
+    },
+    failNextPartner(fault) {
+      nextPartnerFault = fault;
     },
   };
 }
@@ -194,6 +253,82 @@ function resolveMockUserinfo(userinfo, profileFn) {
     return { status: 200, body: { ...profileFn(), ...userinfo.profile } };
   }
   return null;
+}
+
+// T2: partner list paging and fault injection.
+const PARTNER_NOTICE = "Rate and sailing records are not evidence of allocatable or transferable capacity.";
+
+function parsePartnerPageNumber(value, fallback, maximum) {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? Math.min(number, maximum) : fallback;
+}
+
+function partnerPage(rows, searchParams) {
+  const page = parsePartnerPageNumber(searchParams.get("page"), 1, 10000);
+  const pageSize = parsePartnerPageNumber(searchParams.get("pageSize"), 50, 100);
+  const start = (page - 1) * pageSize;
+  const data = rows.slice(start, start + pageSize);
+  return {
+    data,
+    meta: {
+      total: rows.length,
+      page,
+      pageSize,
+      returned: data.length,
+      notice: PARTNER_NOTICE,
+    },
+  };
+}
+
+function writeJson(res, status, body) {
+  res.writeHead(status, { "content-type": "application/json" });
+  res.end(JSON.stringify(body));
+}
+
+function writePartnerItem(res, rows, segment, missingDescription) {
+  let id = segment;
+  try {
+    id = decodeURIComponent(segment);
+  } catch {
+    id = segment;
+  }
+  const row = rows.find((item) => item && item.id === id);
+  if (!row) {
+    writeJson(res, 404, { error: "not_found", error_description: missingDescription });
+    return;
+  }
+  writeJson(res, 200, { data: row, meta: { notice: PARTNER_NOTICE } });
+}
+
+function sendPartnerFault(res, fault) {
+  if (fault === "non-json") {
+    res.writeHead(200, { "content-type": "text/plain" });
+    res.end("not-json");
+    return;
+  }
+  if (typeof fault === "number") {
+    const errors = {
+      401: "invalid_token",
+      403: "partner_oauth_disabled",
+      429: "rate_limited",
+      500: "server_error",
+    };
+    writeJson(res, fault, {
+      error: errors[fault] || "error",
+      error_description: errors[fault] || "error",
+    });
+    return;
+  }
+  if (fault && fault.raw != null) {
+    res.writeHead(fault.status || 200, { "content-type": fault.contentType || "text/plain" });
+    res.end(String(fault.raw));
+    return;
+  }
+  if (fault && Object.prototype.hasOwnProperty.call(fault, "json")) {
+    writeJson(res, fault.status || 200, fault.json);
+    return;
+  }
+  writeJson(res, 500, { error: "server_error" });
 }
 
 module.exports = { createMockRateNinja };
