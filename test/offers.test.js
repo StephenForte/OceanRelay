@@ -199,6 +199,24 @@ function panel(html, id) {
   return html.slice(start, end);
 }
 
+const MARKUP = "<img src=x onerror=alert(1)>";
+
+function marked(label) {
+  return `${label}${MARKUP}`;
+}
+
+function escapedMark(label) {
+  return `${label}&lt;img src=x onerror=alert(1)&gt;`;
+}
+
+function assertMarkupEscaped(html, labels, where) {
+  assert.equal(html.includes(MARKUP), false, `${where} rendered raw markup`);
+  assert.equal(html.includes("<img"), false, `${where} rendered a raw img tag`);
+  for (const label of labels) {
+    assert.equal(html.includes(escapedMark(label)), true, `${where} is missing escaped ${label}`);
+  }
+}
+
 function partnerRequests(mock) {
   return mock.requests.filter((req) => req.pathname.startsWith("/api/partner/"));
 }
@@ -685,6 +703,72 @@ describe("offer drafts", () => {
       assert.match(html, /Claimed quantity must be a positive whole number/);
       assert.match(html, /value="Kept Name"/);
       assert.equal(Object.keys(diskOffers(recordsPath)).length, 0);
+    });
+  });
+
+  it("escapes Rate Ninja and seller markup on the chooser, form, preview, and list", async () => {
+    const carrier = marked("RN-CARRIER");
+    const notes = marked("RN-NOTES");
+    const vessel = marked("RN-VESSEL");
+    const codeShareName = marked("RN-SHARE");
+    const serviceTerms = marked("RN-TERMS");
+    const sailing = sailingRow();
+    sailing.vessel = vessel;
+    sailing.carrier = carrier;
+    await withApp({
+      rates: [rateRow("rate-hc-a", { carrier, notes })],
+      sailings: [sailing],
+    }, async ({ base, origin }) => {
+      const { cookie } = await connectOwner({ base, origin });
+      const chooser = await pageOf(base, cookie, "/offers/new");
+      assert.equal(chooser.response.status, 200);
+      assertMarkupEscaped(chooser.html, ["RN-CARRIER", "RN-VESSEL"], "chooser");
+
+      const form = await pageOf(base, cookie, "/offers/new?source=rn_rate&rateId=rate-hc-a&equipment=40HC");
+      assert.equal(form.response.status, 200);
+      assertMarkupEscaped(form.html, ["RN-CARRIER"], "form");
+
+      const rejected = await postForm(base, cookie, "/offers", {
+        csrf_token: form.csrf,
+        source: "rn_rate",
+        rateId: "rate-hc-a",
+        equipment: "40HC",
+        ...sellerFields({
+          quantity: "",
+          operatingCarrier: carrier,
+          codeShareName,
+          serviceTerms,
+        }),
+      });
+      assert.equal(rejected.status, 200);
+      const rejectedHtml = await rejected.text();
+      assertMarkupEscaped(rejectedHtml, ["RN-CARRIER", "RN-SHARE", "RN-TERMS"], "form");
+      const csrf = rejectedHtml.match(/name="csrf_token" value="([^"]+)"/)[1];
+
+      const saved = await postForm(base, cookie, "/offers", {
+        csrf_token: csrf,
+        source: "rn_rate",
+        rateId: "rate-hc-a",
+        equipment: "40HC",
+        ...sellerFields({
+          operatingCarrier: carrier,
+          codeShareName,
+          serviceTerms,
+        }),
+      });
+      assert.equal(saved.status, 302);
+      const preview = await pageOf(base, cookie, saved.headers.get("location"));
+      assert.equal(preview.response.status, 200);
+      assertMarkupEscaped(preview.html, ["RN-CARRIER", "RN-NOTES", "RN-SHARE", "RN-TERMS"], "preview");
+      const buyer = panel(preview.html, "buyer-panel");
+      assert.equal(buyer.includes("RN-NOTES"), false);
+      assert.equal(buyer.includes(MARKUP), false);
+
+      const list = await pageOf(base, cookie, "/offers");
+      assert.equal(list.response.status, 200);
+      assertMarkupEscaped(list.html, ["RN-SHARE"], "list");
+      assert.equal(list.html.includes("RN-NOTES"), false);
+      assert.equal(list.html.includes(MARKUP), false);
     });
   });
 });
