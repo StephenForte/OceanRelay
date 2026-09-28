@@ -252,6 +252,50 @@ describe("requireIdentity", () => {
     }
   });
 
+  it("revokes when it drops a connection without a usable identity", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "oceanrelay-identity-revoke-"));
+    const mock = createMockRateNinja({ clientId: CLIENT_ID, clientSecret: CLIENT_SECRET });
+    const port = await mock.listen();
+    const file = path.join(dir, "store.json");
+    const config = testConfig(`http://127.0.0.1:${port}`);
+    const store = openStore(file, ENCRYPTION_KEY);
+    store.saveConnection("sid-empty", {
+      refreshToken: "refresh-stale",
+      scopes: ["profile:read"],
+      profile: {
+        sub: "",
+        name: "",
+        companyId: "",
+        companyName: "",
+        companyType: "",
+        active: false,
+      },
+    });
+    const server = createServer({ config, store });
+    try {
+      const res = fakeRes();
+      const result = server.requireIdentity({
+        method: "GET",
+        headers: { cookie: sessionCookie("sid-empty", "csrf-empty") },
+      }, res);
+      assert.equal(result, null);
+      assert.equal(store.publicConnection("sid-empty"), null);
+      const started = Date.now();
+      while (mock.calls.filter((call) => call === "POST /oauth/revoke").length < 1) {
+        if (Date.now() - started > 2000) assert.fail("revoke was not recorded");
+        await new Promise((resolve) => setTimeout(resolve, 15));
+      }
+      assert.equal(mock.calls.filter((call) => call === "POST /oauth/revoke").length, 1);
+      for (const req of mock.requests) {
+        assert.equal(req.pathname.startsWith("/api/v1/"), false);
+        assert.equal(JSON.stringify(req.headers).toLowerCase().includes("api-key"), false);
+      }
+    } finally {
+      await mock.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("redirects a GET that has a session and no connection", () => {
     const config = testConfig("http://127.0.0.1:9");
     const store = openStore(null, ENCRYPTION_KEY);
@@ -264,5 +308,51 @@ describe("requireIdentity", () => {
     assert.equal(result, null);
     assert.equal(res.status, 302);
     assert.equal(res.headers.Location, "/");
+  });
+});
+
+describe("home page identity", () => {
+  it("renders Disconnected, deletes the row, and revokes an empty profile", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "oceanrelay-home-identity-"));
+    const mock = createMockRateNinja({ clientId: CLIENT_ID, clientSecret: CLIENT_SECRET });
+    const port = await mock.listen();
+    const file = path.join(dir, "store.json");
+    const config = testConfig(`http://127.0.0.1:${port}`);
+    const store = openStore(file, ENCRYPTION_KEY);
+    store.saveConnection("sid-empty", {
+      refreshToken: "refresh-stale",
+      scopes: ["profile:read"],
+      profile: {
+        sub: "",
+        name: "",
+        companyId: "",
+        companyName: "",
+        companyType: "",
+        active: false,
+      },
+    });
+    const server = createServer({ config, store });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const response = await fetch(`http://127.0.0.1:${server.address().port}/`, {
+        headers: { cookie: sessionCookie("sid-empty", "csrf-empty") },
+      });
+      const html = await response.text();
+      assert.equal(response.status, 200);
+      assert.match(html, /<p class="status">Disconnected<\/p>/);
+      assert.equal(html.includes("Your offers"), false);
+      assert.equal(store.publicConnection("sid-empty"), null);
+      const reopened = openStore(file, ENCRYPTION_KEY);
+      assert.equal(reopened.publicConnection("sid-empty"), null);
+      assert.equal(mock.calls.filter((call) => call === "POST /oauth/revoke").length, 1);
+      for (const req of mock.requests) {
+        assert.equal(req.pathname.startsWith("/api/v1/"), false);
+        assert.equal(JSON.stringify(req.headers).toLowerCase().includes("api-key"), false);
+      }
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+      await mock.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

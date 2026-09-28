@@ -9,8 +9,9 @@ const rn = require("./lib/rate-ninja");
 const { renderPage } = require("./lib/page");
 const systemRoutes = require("./lib/routes/system");
 const connectRoutes = require("./lib/routes/connect");
+const offerRoutes = require("./lib/routes/offers");
 
-const areas = [systemRoutes, connectRoutes];
+const areas = [systemRoutes, connectRoutes, offerRoutes];
 
 const accessTokens = new Map();
 const refreshInflight = new Map();
@@ -189,8 +190,17 @@ function createServer({ config, store, records = null, fetchImpl = globalThis.fe
     const identity = connection ? identityFromProfile(connection.profile) : null;
     if (!session || !identity) {
       if (session && connection) {
+        const secrets = store.connectionSecrets(session.sid);
         store.deleteConnection(session.sid);
         forgetAccessToken(session.sid);
+        // Synchronous gate (C-1). Revoke starts here and is not awaited.
+        // Errors are swallowed so a failed revoke cannot reject the process.
+        const token = secrets && secrets.refreshToken;
+        if (typeof token === "string" && token.length > 0) {
+          endpoints()
+            .then((ready) => revokeRefreshToken(ready, token))
+            .catch(() => {});
+        }
       }
       if (req.method === "GET") redirect(res, "/", cookies);
       else sendJson(res, 403, { error: "not_connected" });
