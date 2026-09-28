@@ -249,7 +249,7 @@ describe("bugbot regressions", () => {
     store.saveConnection("sid-race", {
       refreshToken: "refresh-old",
       scopes: ["profile:read"],
-      profile: { name: "SteveF", companyName: "Kings", companyType: "Contract Owner" },
+      profile: { sub: "user-owner", companyId: "kings", name: "SteveF", companyName: "Kings", companyType: "Contract Owner" },
     });
     let calls = 0;
     let release;
@@ -301,7 +301,7 @@ describe("bugbot regressions", () => {
     store.saveConnection("sid-down", {
       refreshToken: "refresh-old",
       scopes: ["profile:read"],
-      profile: { name: "SteveF", companyName: "Kings", companyType: "Contract Owner" },
+      profile: { sub: "user-owner", companyId: "kings", name: "SteveF", companyName: "Kings", companyType: "Contract Owner" },
     });
     const fetchImpl = async () => {
       throw new Error("connect ECONNREFUSED");
@@ -336,7 +336,7 @@ describe("bugbot regressions", () => {
     writer.saveConnection("sid-bad", {
       refreshToken: "refresh-old",
       scopes: ["profile:read"],
-      profile: { name: "SteveF", companyName: "Kings", companyType: "Contract Owner" },
+      profile: { sub: "user-owner", companyId: "kings", name: "SteveF", companyName: "Kings", companyType: "Contract Owner" },
     });
     const raw = JSON.parse(fs.readFileSync(file, "utf8"));
     raw.connections["sid-bad"].refreshCiphertext = "v1.not-a-valid-ciphertext";

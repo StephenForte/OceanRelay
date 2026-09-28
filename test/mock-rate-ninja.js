@@ -228,6 +228,12 @@ function createMockRateNinja({ clientId, clientSecret, userinfo, rates, sailings
     failNextPartner(fault) {
       nextPartnerFault = fault;
     },
+    updateRate(id, patch) {
+      const row = rateRows.find((item) => item && item.id === id);
+      if (!row || !patch || typeof patch !== "object") return false;
+      Object.assign(row, patch);
+      return true;
+    },
   };
 }
 
