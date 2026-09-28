@@ -149,3 +149,10 @@ buyerMinor`, `snapshotFromRate(rateDto, equipment, retrievedAt)`, `canonicalTerm
 `CAPACITY_STATUSES`, `canChangeCapacityStatus(from, to)`, `CURRENCIES`.
 The salted on-chain commitment (Phase 5) is a separate function added later; `termsHash`
 here is unsalted and never leaves the server.
+
+*Amended 2026-09-28 (planner documentation error, no behaviour change):* the T3 prompt
+also required `sourceWarnings` and the shared caveat strings, which this list omitted.
+As merged in T3, C-4 also exports `sourceWarnings`, `SELLER_CLAIM_CAVEAT`,
+`CARRIER_CONFIRMED_CAVEAT`, `CAPACITY_CAVEATS`, `LIMITS`, `SOURCES`, `EQUIPMENT`, `UNITS`.
+The field set hashed by `canonicalTerms` v1 is listed in the comment above that function in
+`lib/offer-domain.js`. Whether acceptances use it is open (plan §6, F-3).
