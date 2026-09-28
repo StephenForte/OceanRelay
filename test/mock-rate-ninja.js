@@ -1,7 +1,7 @@
 const http = require("node:http");
 const crypto = require("node:crypto");
 
-function createMockRateNinja({ clientId, clientSecret }) {
+function createMockRateNinja({ clientId, clientSecret, userinfo } = {}) {
   const codes = new Map();
   const refreshTokens = new Map();
   const calls = [];
@@ -123,6 +123,14 @@ function createMockRateNinja({ clientId, clientSecret }) {
         res.end(JSON.stringify({ error: "invalid_token" }));
         return;
       }
+      // T1 additive block: userinfo failure status or profile override.
+      // When `userinfo` is omitted, the default profile response below is unchanged.
+      const userinfoOverride = resolveMockUserinfo(userinfo, profile);
+      if (userinfoOverride) {
+        res.writeHead(userinfoOverride.status, { "content-type": "application/json" });
+        res.end(JSON.stringify(userinfoOverride.body));
+        return;
+      }
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify(profile()));
       return;
@@ -171,6 +179,21 @@ function readBody(req) {
     req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
     req.on("error", reject);
   });
+}
+
+// T1: optional userinfo failure status or profile override for createMockRateNinja.
+function resolveMockUserinfo(userinfo, profileFn) {
+  if (!userinfo || typeof userinfo !== "object") return null;
+  if (Number.isInteger(userinfo.status) && userinfo.status !== 200) {
+    const body = userinfo.body && typeof userinfo.body === "object"
+      ? userinfo.body
+      : { error: "server_error" };
+    return { status: userinfo.status, body };
+  }
+  if (userinfo.profile && typeof userinfo.profile === "object") {
+    return { status: 200, body: { ...profileFn(), ...userinfo.profile } };
+  }
+  return null;
 }
 
 module.exports = { createMockRateNinja };

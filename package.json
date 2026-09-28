@@ -6,9 +6,9 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test test/connect.test.js"
+    "test": "node --test \"test/*.test.js\""
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20.12"
   }
 }
