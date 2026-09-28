@@ -71,11 +71,13 @@ and T4 handle the meaning. Add a test that a `rate40D: 0` passes through as `0`.
   option to `createMockRateNinja` (default empty arrays), handlers for the four partner
   paths with bearer-token checking against the mock's issued access tokens, paging via
   `page`/`pageSize`, and a switch to make the next response 401/403/429/500 or non-JSON.
-  Record request headers so tests can assert no API key is sent. T1 is adding a userinfo
-  option to the same file at the same time; keep your code in its own block and do not
-  reorder existing code. Use fixture rows shaped exactly like the DTOs in `docs/plan.md` §1.
+  Record request headers so tests can assert no API key is sent. T1 (merged) already
+  added a `userinfo` option: a block inside the `/oauth/userinfo` handler and
+  `resolveMockUserinfo` at the end of the file. Leave both untouched, keep the existing
+  `createMockRateNinja({ clientId, clientSecret, userinfo } = {})` options working, put
+  your code in its own block, and do not reorder existing code. Use fixture rows shaped exactly like the DTOs in `docs/plan.md` §1.
 - **Off-limits:** `server.js`, `lib/routes/*`, `lib/records.js`, `lib/config.js`,
-  `package.json` (T1 owns these), `lib/offer-domain.js` (T3), all of `docs/`.
+  `package.json` (T1's merged work; not part of this task), `lib/offer-domain.js` (T3), all of `docs/`.
 
 No route, page, or UI in this task. If you need one to test, you don't; test the client
 directly against the mock. If you need to change an off-limits file, stop and report.
@@ -117,9 +119,9 @@ numbers. If you think you need one, stop and ask.
 ## Gate
 
 Run at handoff time, after rebasing onto current `main`; a run against an older base does
-not count. `node --check` on every changed `.js` file, then `node --test "test/*.test.js"`
-(until T1 merges, `npm test` only runs `test/connect.test.js`, so it would skip your
-tests). All passing, 0 skipped. Report the count before and after; unexplained movement
+not count. `node --check` on every changed `.js` file, then `npm test` (it now runs
+every `test/*.test.js` file). Current `main` has 27 tests, all passing. Expected: 27 plus
+yours, all passing, 0 skipped. Report the count before and after; unexplained movement
 is a finding. No runtime dependencies (D-9).
 
 ## Disagree if needed
@@ -138,9 +140,9 @@ BRANCH:      task/T2-partner-reads
 PR:          <url>
 STATUS:      complete | complete-with-caveats | blocked
 
-GATE:        node --check ✅   node --test "test/*.test.js": <N> passed, <N> failed, <N> skipped
+GATE:        node --check ✅   npm test: <N> passed, <N> failed, <N> skipped
              base: main at <sha> (rebased at handoff time)
-             tests on main before: <N>   after: <N>   difference explained: <yes/why>
+             tests on main before: 27   after: <N>   difference explained: <yes/why>
 MIGRATION:   none
 
 SHARED FILES TOUCHED:
@@ -166,4 +168,4 @@ EXISTING TESTS MODIFIED lets the reviewer judge strengthening versus weakening w
 hunting for the change. RISKS AND FOLLOW-UPS is where an honest gap gets checked instead
 of becoming an incident.
 
-/goal T2 is done when branch `task/T2-partner-reads`, rebased on current `main`, passes `node --check` and `node --test "test/*.test.js"` with every test listed above present, `grep -c "api/partner" lib/rate-ninja.js` is non-zero, no test or code path sends an API key or calls `/api/v1/`, and a draft PR exists whose description holds the filled-in handoff block.
+/goal T2 is done when branch `task/T2-partner-reads`, rebased on current `main`, passes `node --check` and `npm test` with every test listed above present, `grep -c "api/partner" lib/rate-ninja.js` is non-zero, no test or code path sends an API key or calls `/api/v1/`, and a draft PR exists whose description holds the filled-in handoff block.
