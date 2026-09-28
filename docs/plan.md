@@ -96,13 +96,13 @@ Status values: `ready` (prompt written, can dispatch), `blocked-on <x>`, `dispat
 | --- | --- | --- | --- | --- | --- | --- |
 | T1 | Router split, identity hardening (D-2), records store (C-1, C-2, M-1), test glob | `server.js`, `lib/router.js` (new), `lib/routes/*.js` (new), `lib/records.js` (new), `lib/config.js`, `lib/page.js`, `package.json`, `README.md`, `.env.example`, `test/connect.test.js`, `test/records.test.js` (new), `test/identity.test.js` (new) | `test/mock-rate-ninja.js` | `lib/rate-ninja.js` (T2), `lib/offer-domain.js` (T3), `lib/store.js` token format | strongest | merged `1a82731` 2026-09-28, PR #6 (review in §6) |
 | T2 | Rate Ninja partner reads client (C-3) | `lib/rate-ninja.js` (add functions only), `test/partner-reads.test.js` (new) | `test/mock-rate-ninja.js` | `server.js`, `lib/routes/*` (T1), everything else | mid | ready (prompt refreshed for post-T1 main 2026-09-28) — `docs/prompts/T2-partner-reads.md` |
-| T3 | Offer domain: validation, pricing, snapshot, canonical terms, buyer view, status rules (C-4) | `lib/offer-domain.js` (new), `test/offer-domain.test.js` (new) | none | everything else | strong | ready (prompt refreshed for post-T1 main 2026-09-28) — `docs/prompts/T3-offer-domain.md` |
+| T3 | Offer domain: validation, pricing, snapshot, canonical terms, buyer view, status rules (C-4) | `lib/offer-domain.js` (new), `test/offer-domain.test.js` (new) | none | everything else | strong | approved 2026-09-28, PR #9 at `d936b0a` (review in §6) |
 
 ### Wave B — Phase 3 (blocked on T1, T2, T3 merged)
 
 | Id | Task | Owns | Model | Status |
 | --- | --- | --- | --- | --- |
-| T4 | Offer draft + preview, rate-based and manual; source-rate change/expiry warning. **Also carries F-1** (§6). | `lib/routes/offers.js`, `lib/views/offers.js`, offer methods in `lib/records.js`, `test/offers.test.js` | strong | blocked-on T1, T2, T3 |
+| T4 | Offer draft + preview, rate-based and manual; source-rate change/expiry warning. **Also carries F-1, F-2, F-4** (§6). | `lib/routes/offers.js`, `lib/views/offers.js`, offer methods in `lib/records.js`, `test/offers.test.js` | strong | blocked-on T1, T2, T3 |
 | A-3 | **Phase 3 acceptance (operator, deployed):** owner with rates saves and previews an offer from a rate; owner with no rates saves and previews a manual offer; both previews say quantity is the seller's claim. Requires O-1, O-2, O-4(b). | — | — | blocked-on T4 |
 
 T4's prompt is written when Wave A has merged, against the contracts as merged, not as
@@ -115,7 +115,7 @@ Planned split, subject to revision after Phase 3 lands:
 | Id | Task | Notes |
 | --- | --- | --- |
 | T5 | Offer versions, publish/pause/expire, marketplace search, buyer view | Introduces `offer_versions`; migration **M-2**. |
-| T6 | Requests, accept/decline/counter, availability accounting | The concurrency task. D-3's synchronous-mutation rule is the core invariant; test with overlapping requests. |
+| T6 | Requests, accept/decline/counter, availability accounting. **Blocked on F-3** (§6). | The concurrency task. D-3's synchronous-mutation rule is the core invariant; test with overlapping requests. |
 | T7 | Post-acceptance carrier statuses, cancellation, dispute state | Mutual-cancel or unresolved dispute only (PRD Phase 4). |
 | T8 | Audit log and operator review screen | Operator identity is an open question: the PRD has an operator role but no way to authenticate one. Decide before T8's prompt (candidate: allowlist of Rate Ninja `sub` values in config). |
 | A-4 | Phase 4 acceptance with accounts O-4(a) and O-4(c) | |
@@ -189,3 +189,44 @@ Follow-ups opened:
   `records` is omitted. `main()` passes it, but T4's tests must pass a file-backed store
   wherever persistence is asserted.
 - **O-6** above.
+
+### T3 — PR #9, `d936b0a`, approved 2026-09-28
+
+Verified by the planner:
+
+- Base `baed778` = `origin/main`. Diff is exactly `lib/offer-domain.js` and
+  `test/offer-domain.test.js`.
+- Gate re-run in a clean worktree: `node --check` on both files; `npm test` 64/0/0
+  (27 + 37 new, matches the handoff).
+- 31 probes, all pass:
+  - buyerView leaks nothing (base price, bps, snapshot, notes, `sub`, `companyId`, source
+    id, an unknown future field) and shows the buyer price and code-share line;
+  - percent rounding half-up at the exact .5 boundary; overflow throws;
+  - `2026-02-30` rejected; deadline equal to window end allowed, one day after rejected;
+  - `companyId`, `sub`, `capacityStatus`, `buyerMinor`, `__proto__` in input never reach
+    `value`;
+  - snapshot deep-frozen and independent of the source object; a `0` column refused;
+  - sourceWarnings: key-order change is not a change; expiry on today is not expired;
+    slash and empty dates are unreadable;
+  - canonicalTerms stable across key order, ignores private extras and extra markup keys,
+    changes when quantity changes.
+- **Probe proven able to fail:** adding `...source` into buyerView's return turns the
+  leak probe red and the worker's suite goes to 61 pass / 3 fail. Reverted afterwards.
+
+Follow-ups opened:
+
+- **F-3 (decision, blocks T6):** canonicalTerms v1 puts the seller's private `baseMinor`
+  and `markup` into the acceptance-hash preimage, alongside `buyerMinor`. The hash is
+  unsalted, and markup is a small search space, so anyone holding the hash plus the buyer
+  price could recover the buy rate by enumeration. C-4 keeps `termsHash` server-side, so
+  nothing leaks today. The PRD says an acceptance records "a hash of the terms"; the buyer
+  only saw buyer-visible terms. Decide before T6: (a) keep v1 and make "termsHash never
+  leaves the server" a permanent rule, or (b) add `canonicalTerms` v2 over buyer-visible
+  terms only, used for acceptances. The planner recommends (b). Also decide whether a
+  capacity-status change creates a new offer version (it changes the hash under v1).
+  The ambiguity came from the T3 prompt ("fields that define the commercial terms"),
+  not from the worker.
+- **F-4 (goes to T4):** `snapshot.baseAmount` is Rate Ninja's whole-unit integer. T4 must
+  convert it to `baseMinor` with the confirmed currency's exponent (D-5), e.g. 1500 USD →
+  150000. Copying it straight across under-prices exponent-2 currencies by 100×. T4 also
+  converts form strings to numbers, because `validateDraft` rejects numeric strings.
