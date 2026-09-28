@@ -1,17 +1,16 @@
 const http = require("node:http");
 const { loadConfig, publicConfig } = require("./lib/config");
 const { openStore } = require("./lib/store");
+const { openRecords } = require("./lib/records");
+const { createRouter } = require("./lib/router");
 const { createPkce, safeEqual } = require("./lib/pkce");
 const { COOKIE_NAME, readSession, parseCookies, newSession, sessionCookie } = require("./lib/session");
-const {
-  discoverEndpoints,
-  authorizeUrl,
-  exchangeCode,
-  refreshToken,
-  revokeToken,
-  fetchUserInfo,
-} = require("./lib/rate-ninja");
+const rn = require("./lib/rate-ninja");
 const { renderPage } = require("./lib/page");
+const systemRoutes = require("./lib/routes/system");
+const connectRoutes = require("./lib/routes/connect");
+
+const areas = [systemRoutes, connectRoutes];
 
 const accessTokens = new Map();
 const refreshInflight = new Map();
@@ -110,6 +109,29 @@ function forgetAccessToken(sessionId) {
   accessTokens.delete(sessionId);
 }
 
+function presentId(value) {
+  return typeof value === "string" && value.trim() !== "";
+}
+
+function identityRefusal(profile, userinfoFailed) {
+  if (userinfoFailed || !profile || typeof profile !== "object") return "identity_unavailable";
+  if (!presentId(profile.sub) || !presentId(profile.companyId) || profile.active === false) {
+    return "identity_unavailable";
+  }
+  if (profile.companyType !== "Contract Owner") return "only_contract_owner";
+  return null;
+}
+
+function identityFromProfile(profile) {
+  if (identityRefusal(profile, false)) return null;
+  return {
+    sub: profile.sub,
+    companyId: profile.companyId,
+    companyName: typeof profile.companyName === "string" ? profile.companyName : "",
+    name: typeof profile.name === "string" ? profile.name : "",
+  };
+}
+
 async function refreshStoredToken(sessionId, config, store, fetchImpl, endpoints) {
   const cached = currentAccessToken(sessionId);
   if (cached) return { ok: true, accessToken: cached };
@@ -118,7 +140,7 @@ async function refreshStoredToken(sessionId, config, store, fetchImpl, endpoints
   const presented = stored.refreshToken;
   let refreshed;
   try {
-    refreshed = await refreshToken(fetchImpl, endpoints, config, presented);
+    refreshed = await rn.refreshToken(fetchImpl, endpoints, config, presented);
   } catch {
     return { ok: false, error: "refresh_failed" };
   }
@@ -151,184 +173,88 @@ function ensureAccessToken(sessionId, config, store, fetchImpl, endpoints) {
   return pending;
 }
 
-function createServer({ config, store, fetchImpl = globalThis.fetch }) {
+function createServer({ config, store, records = null, fetchImpl = globalThis.fetch } = {}) {
+  const activeRecords = records || openRecords(null);
   let endpointsPromise;
 
   function endpoints() {
-    if (!endpointsPromise) endpointsPromise = discoverEndpoints(config.issuer, fetchImpl);
+    if (!endpointsPromise) endpointsPromise = rn.discoverEndpoints(config.issuer, fetchImpl);
     return endpointsPromise;
   }
 
-  return http.createServer(async (req, res) => {
+  function requireIdentity(req, res) {
+    const { session } = sessionFromRequest(req, config);
+    const cookies = cookieFor(req, config, session);
+    const connection = session ? store.publicConnection(session.sid) : null;
+    const identity = connection ? identityFromProfile(connection.profile) : null;
+    if (!session || !identity) {
+      if (session && connection) {
+        store.deleteConnection(session.sid);
+        forgetAccessToken(session.sid);
+      }
+      if (req.method === "GET") redirect(res, "/", cookies);
+      else sendJson(res, 403, { error: "not_connected" });
+      return null;
+    }
+    return { session, identity };
+  }
+
+  async function revokeRefreshToken(ready, token) {
+    try {
+      if (!ready || typeof token !== "string" || token.length === 0) return;
+      await rn.revokeToken(fetchImpl, ready, config, token);
+    } catch {
+      // Identity was refused. A revoke failure does not restore the connection.
+    }
+  }
+
+  const deps = {
+    config,
+    store,
+    records: activeRecords,
+    rn,
+    render: renderPage,
+    requireIdentity,
+    publicConfig,
+    sendJson,
+    sendHtml,
+    redirect,
+    readBody,
+    formBody,
+    safeEqual,
+    createPkce,
+    fetchImpl,
+    identityRefusal,
+    sessionFromRequest(req) {
+      return sessionFromRequest(req, config);
+    },
+    cookieFor(req, session) {
+      return cookieFor(req, config, session);
+    },
+    endpoints,
+    ensureAccessToken(sessionId, ready) {
+      return ensureAccessToken(sessionId, config, store, fetchImpl, ready);
+    },
+    rememberAccessToken,
+    forgetAccessToken,
+    revokeRefreshToken,
+  };
+
+  const router = createRouter();
+  for (const area of areas) area.register(router, deps);
+
+  const server = http.createServer(async (req, res) => {
     const url = new URL(req.url || "/", "http://127.0.0.1");
     try {
-      if (req.method === "GET" && url.pathname === "/health") {
-        sendJson(res, 200, { status: "ok" });
-        return;
-      }
-      if (req.method === "GET" && url.pathname === "/config") {
-        sendJson(res, 200, publicConfig(config));
-        return;
-      }
-      if (req.method === "GET" && url.pathname === "/") {
-        await handleHome(req, res, url);
-        return;
-      }
-      if (req.method === "POST" && url.pathname === "/connect") {
-        await handleConnect(req, res);
-        return;
-      }
-      if (req.method === "GET" && url.pathname === "/oauth/callback") {
-        await handleCallback(req, res, url);
-        return;
-      }
-      if (req.method === "POST" && url.pathname === "/disconnect") {
-        await handleDisconnect(req, res);
-        return;
-      }
-      sendJson(res, 404, { error: "not found" });
+      const handled = await router.handle(req, res, url);
+      if (!handled) sendJson(res, 404, { error: "not found" });
     } catch (error) {
       console.error(error && error.message === "body_too_large" ? "body_too_large" : "request_failed");
       if (!res.headersSent) sendJson(res, 500, { error: "request_failed" });
     }
   });
-
-  async function handleHome(req, res, url) {
-    const { session } = sessionFromRequest(req, config);
-    if (session && store.publicConnection(session.sid)) {
-      try {
-        const ready = await endpoints();
-        if (ready) {
-          const access = await ensureAccessToken(session.sid, config, store, fetchImpl, ready);
-          if (!access.ok && access.disconnect) store.deleteConnection(session.sid);
-        }
-      } catch {
-        console.error("connection_refresh_failed");
-      }
-    }
-    const connection = session ? store.publicConnection(session.sid) : null;
-    const html = renderPage({
-      configView: publicConfig(config),
-      connection,
-      csrf: session ? session.csrf : "",
-      result: url.searchParams.get("result") || "",
-    });
-    sendHtml(res, 200, html, cookieFor(req, config, session));
-  }
-
-  async function handleConnect(req, res) {
-    const { session } = sessionFromRequest(req, config);
-    const cookies = cookieFor(req, config, session);
-    const form = formBody(await readBody(req));
-    if (!config.ok || !session) {
-      redirect(res, "/?result=config_incomplete", cookies);
-      return;
-    }
-    if (!safeEqual(form.csrf_token || "", session.csrf)) {
-      sendJson(res, 403, { error: "invalid_csrf" });
-      return;
-    }
-    const pkce = createPkce();
-    store.savePending(session.sid, { state: pkce.state, verifier: pkce.verifier, createdAt: Date.now() });
-    const ready = await endpoints();
-    redirect(res, authorizeUrl(ready.authorization, {
-      clientId: config.clientId,
-      redirectUri: config.redirectUri,
-      state: pkce.state,
-      challenge: pkce.challenge,
-    }), cookies);
-  }
-
-  async function handleCallback(req, res, url) {
-    const { session } = sessionFromRequest(req, config);
-    const cookies = cookieFor(req, config, session);
-    if (!config.ok || !session) {
-      redirect(res, "/?result=config_incomplete", cookies);
-      return;
-    }
-    const oauthError = url.searchParams.get("error");
-    const description = url.searchParams.get("error_description") || "";
-    if (oauthError) {
-      store.takePending(session.sid, url.searchParams.get("state") || "");
-      if (oauthError === "access_denied" && description === "only_contract_owner") {
-        redirect(res, "/?result=only_contract_owner", cookies);
-        return;
-      }
-      if (oauthError === "access_denied") {
-        redirect(res, "/?result=access_denied", cookies);
-        return;
-      }
-      redirect(res, `/?result=${encodeURIComponent(oauthError === "partner_oauth_disabled" ? oauthError : "token_exchange_failed")}`, cookies);
-      return;
-    }
-    const pending = store.takePending(session.sid, url.searchParams.get("state") || "");
-    const code = url.searchParams.get("code") || "";
-    if (!pending || !code) {
-      redirect(res, "/?result=invalid_state", cookies);
-      return;
-    }
-    const ready = await endpoints();
-    const exchanged = await exchangeCode(fetchImpl, ready, config, { code, verifier: pending.verifier });
-    if (!exchanged.ok) {
-      const result = exchanged.error === "partner_oauth_disabled" ? "partner_oauth_disabled" : "token_exchange_failed";
-      redirect(res, `/?result=${result}`, cookies);
-      return;
-    }
-    const profileResult = await fetchUserInfo(fetchImpl, ready, exchanged.body.access_token);
-    const profile = profileResult.ok ? profileResult.profile : {
-      sub: "",
-      name: "",
-      companyId: "",
-      companyName: "",
-      companyType: "",
-      active: false,
-    };
-    const scopes = typeof exchanged.body.scope === "string" && exchanged.body.scope.trim()
-      ? exchanged.body.scope.trim().split(/\s+/)
-      : config.scopes;
-    store.saveConnection(session.sid, {
-      refreshToken: exchanged.body.refresh_token,
-      scopes,
-      profile,
-    });
-    rememberAccessToken(session.sid, exchanged.body.access_token, exchanged.body.expires_in);
-    redirect(res, "/?result=connected", cookies);
-  }
-
-  async function handleDisconnect(req, res) {
-    const { session } = sessionFromRequest(req, config);
-    const cookies = cookieFor(req, config, session);
-    const form = formBody(await readBody(req));
-    if (!session || !safeEqual(form.csrf_token || "", session.csrf)) {
-      sendJson(res, 403, { error: "invalid_csrf" });
-      return;
-    }
-    const stored = store.connectionSecrets(session.sid);
-    if (!stored) {
-      if (store.publicConnection(session.sid)) store.deleteConnection(session.sid);
-      forgetAccessToken(session.sid);
-      redirect(res, "/?result=disconnected", cookies);
-      return;
-    }
-    let ready;
-    try {
-      ready = await endpoints();
-    } catch {
-      ready = null;
-    }
-    if (!ready) {
-      redirect(res, "/?result=revoke_failed", cookies);
-      return;
-    }
-    const revoked = await revokeToken(fetchImpl, ready, config, stored.refreshToken);
-    if (!revoked.ok && revoked.error !== "partner_oauth_disabled") {
-      redirect(res, "/?result=revoke_failed", cookies);
-      return;
-    }
-    store.deleteConnection(session.sid);
-    forgetAccessToken(session.sid);
-    redirect(res, "/?result=disconnected", cookies);
-  }
+  server.requireIdentity = requireIdentity;
+  return server;
 }
 
 function main() {
@@ -344,7 +270,14 @@ function main() {
   }
   const config = loadConfig(process.env);
   const store = openStore(config.storePath, config.tokenEncryptionKey);
-  const server = createServer({ config, store });
+  let records;
+  try {
+    records = openRecords(config.recordsPath);
+  } catch (error) {
+    console.error(error && error.message ? error.message : "records_unavailable");
+    process.exit(1);
+  }
+  const server = createServer({ config, store, records });
   server.listen(port, "0.0.0.0", () => {
     console.log(`listening on 0.0.0.0:${port}`);
   });
@@ -352,4 +285,15 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { createServer, loadConfig, openStore, publicConfig };
+module.exports = {
+  createServer,
+  loadConfig,
+  openStore,
+  publicConfig,
+  sendJson,
+  sendHtml,
+  redirect,
+  readBody,
+  formBody,
+  securityHeaders,
+};

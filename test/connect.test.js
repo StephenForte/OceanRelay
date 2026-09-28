@@ -371,3 +371,47 @@ describe("challenge matches verifier", () => {
     assert.equal(challenge.length > 20, true);
   });
 });
+
+describe("router", () => {
+  it("reaches a route registered through lib/routes and returns JSON for an unknown path", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "oceanrelay-router-"));
+    const app = await startApp({
+      RATE_NINJA_CLIENT_ID: CLIENT_ID,
+      RATE_NINJA_CLIENT_SECRET: CLIENT_SECRET,
+      SESSION_SECRET,
+      TOKEN_ENCRYPTION_KEY: ENCRYPTION_KEY,
+      RATE_NINJA_BASE_URL: "http://127.0.0.1:9",
+      OCEANRELAY_REDIRECT_URI: "http://127.0.0.1:9/oauth/callback",
+    }, path.join(dir, "store.json"));
+    try {
+      const health = await fetch(`${app.base}/health`);
+      assert.equal(health.status, 200);
+      assert.deepEqual(await health.json(), { status: "ok" });
+      const missing = await fetch(`${app.base}/no-such-route`);
+      assert.equal(missing.status, 404);
+      assert.match(missing.headers.get("content-type"), /application\/json/);
+      assert.equal(missing.headers.get("cache-control"), "no-store");
+      assert.deepEqual(await missing.json(), { error: "not found" });
+    } finally {
+      await app.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("dispatches exact paths before pattern routes", async () => {
+    const { createRouter } = require("../lib/router");
+    const router = createRouter();
+    const seen = [];
+    router.get("/health", async () => {
+      seen.push("health");
+    });
+    router.pattern("GET", /^\/offers\/([^/]+)$/, async (req, res, url, match) => {
+      seen.push(match[1]);
+    });
+    assert.equal(await router.handle({ method: "GET" }, {}, new URL("http://127.0.0.1/health")), true);
+    assert.equal(await router.handle({ method: "GET" }, {}, new URL("http://127.0.0.1/offers/abc")), true);
+    assert.equal(await router.handle({ method: "POST" }, {}, new URL("http://127.0.0.1/offers/abc")), false);
+    assert.equal(await router.handle({ method: "GET" }, {}, new URL("http://127.0.0.1/missing")), false);
+    assert.deepEqual(seen, ["health", "abc"]);
+  });
+});
