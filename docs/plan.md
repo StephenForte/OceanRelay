@@ -102,7 +102,7 @@ Status values: `ready` (prompt written, can dispatch), `blocked-on <x>`, `dispat
 
 | Id | Task | Owns | Model | Status |
 | --- | --- | --- | --- | --- |
-| T4 | Offer draft + preview, rate-based and manual; source-rate change/expiry warning. **Also carries F-1, F-2, F-4, F-5** (§6). | `lib/routes/offers.js`, `lib/views/offers.js`, offer methods in `lib/records.js`, `test/offers.test.js` | strong | ready — `docs/prompts/T4-offer-drafts.md` (publishes C-5; uses D-11, D-12) |
+| T4 | Offer draft + preview, rate-based and manual; source-rate change/expiry warning. **Also carries F-1, F-2, F-4, F-5** (§6). | `lib/routes/offers.js`, `lib/views/offers.js`, offer methods in `lib/records.js`, `test/offers.test.js` | strong | approved 2026-09-28 after one fix round, PR #14 at `40278e5` (review in §6) |
 | A-3 | **Phase 3 acceptance (operator, deployed):** owner with rates saves and previews an offer from a rate; owner with no rates saves and previews a manual offer; both previews say quantity is the seller's claim. Requires O-1, O-2, O-4(b). | — | — | blocked-on T4 |
 
 T4's prompt is written when Wave A has merged, against the contracts as merged, not as
@@ -301,3 +301,71 @@ path". The WHATWG URL parser does not decode percent-escapes in `pathname`. Prob
 all return ok and request the encoded path; only `.` and `..` return `not_found` without
 a request. This is a false positive, not a stale finding: the code it describes is
 unchanged on `main`. The thread was answered and resolved on PR #10. No code change.
+
+### T4 — PR #14, first round `ef4a4e1` changes requested; `40278e5` approved 2026-09-28
+
+Verified by the planner:
+
+- Base `1291c1f` = `origin/main`. No off-limits file touched. Shared files match the
+  handoff: one `areas` entry and the F-1 revoke in `server.js`; the offers link and the
+  `escapeHtml` export in `lib/page.js`; `updateRate` added to the mock.
+- Gate re-run in a clean worktree: `node --check` on every changed file; `npm test`
+  99/0/0 (82 + 17, matches the handoff).
+- `test/connect.test.js`: the three fixtures only gained `sub` and `companyId`; no
+  assertion changed. Judged a strengthening.
+- `lib/records.js`: every method goes through `transact` and returns `structuredClone`
+  copies, so callers cannot mutate stored state. `setCapacityStatus` checks company and
+  `canChangeCapacityStatus` inside the transaction.
+- Probes against the running app (scratch copy of the worker's harness, deleted
+  afterwards):
+  - **P1, tampered rate-based form:** posting `baseMinor=1`, `buyerMinor=1`,
+    `capacityStatus=carrier_confirmed`, `companyId=evil`, `sub=evil`, `snapshot`,
+    `state=published` saves base 150000, buyer 165000, company `kings`, creator
+    `user-owner`, `seller_asserted`, `draft`.
+  - **P2, HTML injection:** `<img src=x onerror=…>` in the Rate Ninja carrier, origin,
+    notes, commodity and sailing vessel fields, and in the seller's origin, code-share
+    name, operating carrier and service terms, never appears raw in the chooser, form,
+    preview or list.
+  - **P3, cross-company:** another company's status POST returns 404 and the stored
+    status is unchanged. Its GET returns 404 with a body byte-identical to an unknown
+    id's. The offer is absent from the other company's list.
+  - **P4, reads write the file:** confirmed (the worker disclosed it). `GET /offers`
+    rewrites the records file.
+  - **P5, money parsing:** `10.5` JPY markup is rejected and nothing is saved.
+    `0.29` + `0.01` USD saves 29 and 30.
+  - **P6, Rate Ninja fails at save time:** a 429 on the save-time fetch saves nothing
+    and shows the rate-limit message, but the seller's typed values are lost.
+
+**Blocking (one item): no regression test for HTML escaping.** With `escapeHtml`
+replaced by an identity function, P2 goes red in all four pages, but the worker's suite
+still passes: 99/99, run alongside the probes as 105/105. The escaping is correct today,
+but nothing guards it. T5 will rework these views and add buyer screens that render
+seller-typed text to another company, where a regression becomes cross-company stored
+XSS. Required: a test that injects a markup payload through Rate Ninja fields and
+through seller-typed fields and asserts it is escaped on the chooser, form, preview and
+list.
+
+Follow-ups opened:
+
+- **F-6 (T5):** reads go through `transact` and rewrite the records file on every
+  `GET /offers` and preview. That is harmless at pilot scale, but a read fails if the
+  disk is full or read-only. Add a read-only `view(fn)` to C-2 (amendment, same
+  synchronous rules) and use it for reads.
+- **F-7 (T5 or later, UX):** when the save-time Rate Ninja fetch fails, the seller is
+  sent to the chooser and loses everything typed. Re-render the form with the values
+  and the error instead.
+
+**T4 second round, `40278e5` (test-only commit), approved:**
+
+- Base still `1291c1f` = `origin/main`. The commit touches only `test/offers.test.js`
+  (+84, no removed lines).
+- Gate re-run: `node --check`; `npm test` 100/0/0 (82 + 18).
+- The new test injects `<img src=x onerror=alert(1)>` through Rate Ninja carrier, notes
+  and vessel, and through seller code-share name, service terms and operating carrier. It
+  asserts the raw payload is absent **and** the escaped form is present on the chooser,
+  form (including the re-rendered error form), preview and list, and that notes stay off
+  the buyer panel and the list.
+- **Proven able to fail:** with `escapeHtml` stubbed to identity, `npm test` gives
+  99 pass / 1 fail ("chooser rendered raw markup"). Restored, it is 100/0.
+- The worker put its response in the PR description, not a comment. It matches the
+  branch.
