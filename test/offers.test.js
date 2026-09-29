@@ -190,6 +190,13 @@ function onlyOffer(recordsPath) {
   return offers[0];
 }
 
+function versionOf(offer) {
+  assert.ok(offer && Array.isArray(offer.versions));
+  const version = offer.versions.find((item) => item.n === offer.currentVersion);
+  assert.ok(version);
+  return version;
+}
+
 function panel(html, id) {
   const marker = `<section class="panel" id="${id}">`;
   const start = html.indexOf(marker);
@@ -263,11 +270,11 @@ describe("offer drafts", () => {
       const reopened = openRecords(recordsPath);
       const listed = reopened.listCompanyOffers("kings");
       assert.equal(listed.length, 1);
-      assert.equal(listed[0].terms.baseMinor, 150000);
-      assert.equal(listed[0].terms.buyerMinor, 165000);
-      assert.notEqual(listed[0].terms.baseMinor, listed[0].snapshot.baseAmount);
-      assert.equal(listed[0].snapshot.baseAmount, 1500);
-      assert.equal(listed[0].capacityStatus, "seller_asserted");
+      assert.equal(versionOf(listed[0]).terms.baseMinor, 150000);
+      assert.equal(versionOf(listed[0]).terms.buyerMinor, 165000);
+      assert.notEqual(versionOf(listed[0]).terms.baseMinor, versionOf(listed[0]).snapshot.baseAmount);
+      assert.equal(versionOf(listed[0]).snapshot.baseAmount, 1500);
+      assert.equal(versionOf(listed[0]).capacityStatus, "seller_asserted");
       const preview = await pageOf(base, cookie, location);
       assert.match(preview.html, /Private, only you see this/);
       assert.match(preview.html, /What a buyer will see/);
@@ -281,7 +288,7 @@ describe("offer drafts", () => {
       assert.equal(buyer.includes("basis points"), false);
       assert.equal(buyer.includes("snapshot-note-private"), false);
       assert.equal(buyer.includes("rate-hc-a"), false);
-      const stored = onlyOffer(recordsPath);
+      const stored = versionOf(onlyOffer(recordsPath));
       assert.equal(stored.terms.baseMinor, 150000);
       assert.equal(stored.terms.buyerMinor, 165000);
     });
@@ -304,15 +311,16 @@ describe("offer drafts", () => {
       });
       assert.equal(saved.status, 302);
       const offer = onlyOffer(recordsPath);
+      const version = versionOf(offer);
       assert.equal(offer.companyId, "kings");
       assert.notEqual(offer.companyId, "intruder");
-      assert.equal(offer.terms.baseMinor, 150000);
-      assert.equal(offer.terms.buyerMinor, 165000);
-      assert.equal(offer.snapshot.baseAmount, 1500);
-      assert.equal(offer.snapshot.dto.notes, "snapshot-note-private");
-      const again = openRecords(recordsPath).getCompanyOffer("kings", offer.id);
-      assert.equal(again.terms.baseMinor, 150000);
-      assert.equal(again.companyId, "kings");
+      assert.equal(version.terms.baseMinor, 150000);
+      assert.equal(version.terms.buyerMinor, 165000);
+      assert.equal(version.snapshot.baseAmount, 1500);
+      assert.equal(version.snapshot.dto.notes, "snapshot-note-private");
+      const reloaded = openRecords(recordsPath).getCompanyOffer("kings", offer.id);
+      assert.equal(versionOf(reloaded).terms.baseMinor, 150000);
+      assert.equal(reloaded.companyId, "kings");
     });
   });
 
@@ -330,7 +338,7 @@ describe("offer drafts", () => {
         ...sellerFields(),
       });
       assert.equal(saved.status, 302);
-      const offer = onlyOffer(recordsPath);
+      const offer = versionOf(onlyOffer(recordsPath));
       assert.equal(offer.snapshot.baseAmount, 1800);
       assert.equal(offer.terms.baseMinor, 180000);
       assert.equal(offer.terms.buyerMinor, 198000);
@@ -356,15 +364,16 @@ describe("offer drafts", () => {
       });
       assert.equal(saved.status, 302);
       const offer = onlyOffer(recordsPath);
-      assert.equal(offer.source, "manual");
-      assert.equal(offer.snapshot, null);
-      assert.equal(offer.capacityStatus, "seller_asserted");
-      assert.equal(offer.terms.baseMinor, 2000);
+      const version = versionOf(offer);
+      assert.equal(version.source, "manual");
+      assert.equal(version.snapshot, null);
+      assert.equal(version.capacityStatus, "seller_asserted");
+      assert.equal(version.terms.baseMinor, 2000);
       assert.equal(offer.companyId, "kings");
       const preview = await pageOf(base, cookie, saved.headers.get("location"));
       assert.match(preview.html, /Quantity is the seller(?:'|&#39;)s claim/);
       assert.match(panel(preview.html, "buyer-panel"), /operated by/);
-      const again = openRecords(recordsPath).getCompanyOffer("kings", offer.id);
+      const again = versionOf(openRecords(recordsPath).getCompanyOffer("kings", offer.id));
       assert.equal(again.source, "manual");
       assert.equal(again.snapshot, null);
     });
@@ -457,13 +466,15 @@ describe("offer drafts", () => {
         to: "carrier_confirmed",
       });
       assert.equal(confirmed.status, 302);
-      const offer = openRecords(recordsPath).getCompanyOffer("kings", id);
+      const storedOffer = openRecords(recordsPath).getCompanyOffer("kings", id);
+      const offer = versionOf(storedOffer);
       assert.equal(offer.capacityStatus, "carrier_confirmed");
-      assert.equal(offer.statusHistory.length, 1);
-      assert.equal(offer.statusHistory[0].from, "seller_asserted");
-      assert.equal(offer.statusHistory[0].to, "carrier_confirmed");
-      assert.equal(offer.statusHistory[0].actor, "user-owner");
-      assert.equal(Number.isNaN(Date.parse(offer.statusHistory[0].at)), false);
+      assert.equal(storedOffer.statusHistory.length, 1);
+      assert.equal(storedOffer.statusHistory[0].from, "seller_asserted");
+      assert.equal(storedOffer.statusHistory[0].to, "carrier_confirmed");
+      assert.equal(storedOffer.statusHistory[0].actor, "user-owner");
+      assert.equal(storedOffer.statusHistory[0].version, 1);
+      assert.equal(Number.isNaN(Date.parse(storedOffer.statusHistory[0].at)), false);
       const shown = await pageOf(base, cookie, `/offers/${id}`);
       assert.match(shown.html, /roll, change, or cancel/);
       const before = fs.readFileSync(recordsPath);
@@ -474,9 +485,10 @@ describe("offer drafts", () => {
       assert.equal(illegal.status, 400);
       assert.match(await illegal.text(), /not allowed/);
       assert.deepEqual(fs.readFileSync(recordsPath), before);
-      const afterIllegal = openRecords(recordsPath).getCompanyOffer("kings", id);
+      const afterStored = openRecords(recordsPath).getCompanyOffer("kings", id);
+      const afterIllegal = versionOf(afterStored);
       assert.equal(afterIllegal.capacityStatus, "carrier_confirmed");
-      assert.equal(afterIllegal.statusHistory.length, 1);
+      assert.equal(afterStored.statusHistory.length, 1);
       const beforeCsrf = fs.readFileSync(recordsPath);
       const missing = await postForm(base, cookie, `/offers/${id}/capacity-status`, { to: "seller_asserted" });
       assert.equal(missing.status, 403);
@@ -497,26 +509,26 @@ describe("offer drafts", () => {
         ...sellerFields(),
       });
       const id = saved.headers.get("location").split("/").pop();
-      const before = structuredClone(onlyOffer(recordsPath));
+      const before = structuredClone(versionOf(onlyOffer(recordsPath)));
       const fresh = await pageOf(base, cookie, `/offers/${id}`);
       assert.equal(fresh.html.includes("source_changed"), false);
       assert.equal(mock.updateRate("rate-hc-a", { notes: "edited-after-save" }), true);
       const changed = await pageOf(base, cookie, `/offers/${id}`);
       assert.match(changed.html, /source_changed/);
-      assert.equal(onlyOffer(recordsPath).snapshot.dto.notes, "snapshot-note-private");
-      assert.deepEqual(onlyOffer(recordsPath).snapshot, before.snapshot);
-      assert.deepEqual(onlyOffer(recordsPath).terms, before.terms);
+      assert.equal(versionOf(onlyOffer(recordsPath)).snapshot.dto.notes, "snapshot-note-private");
+      assert.deepEqual(versionOf(onlyOffer(recordsPath)).snapshot, before.snapshot);
+      assert.deepEqual(versionOf(onlyOffer(recordsPath)).terms, before.terms);
       assert.equal(mock.updateRate("rate-hc-a", { rateExpirationDate: "2000-01-01" }), true);
       const expired = await pageOf(base, cookie, `/offers/${id}`);
       assert.match(expired.html, /source_expired/);
-      assert.equal(onlyOffer(recordsPath).snapshot.dto.rateExpirationDate, "2099-12-31");
+      assert.equal(versionOf(onlyOffer(recordsPath)).snapshot.dto.rateExpirationDate, "2099-12-31");
       mock.failNextPartner(500);
       const failed = await pageOf(base, cookie, `/offers/${id}`);
       assert.equal(failed.response.status, 200);
       assert.match(failed.html, /Could not check the Rate Ninja rate right now/);
       assert.match(failed.html, /What a buyer will see/);
-      assert.deepEqual(onlyOffer(recordsPath).snapshot, before.snapshot);
-      assert.deepEqual(onlyOffer(recordsPath).terms, before.terms);
+      assert.deepEqual(versionOf(onlyOffer(recordsPath)).snapshot, before.snapshot);
+      assert.deepEqual(versionOf(onlyOffer(recordsPath)).terms, before.terms);
     });
   });
 
@@ -559,7 +571,7 @@ describe("offer drafts", () => {
         ...sellerFields({ markupType: "absolute", markupValue: "0" }),
       });
       assert.equal(cents.status, 302);
-      assert.equal(onlyOffer(recordsPath).terms.baseMinor, 29);
+      assert.equal(versionOf(onlyOffer(recordsPath)).terms.baseMinor, 29);
 
       const priced = await postForm(base, cookie, "/offers", {
         csrf_token: form.csrf,
@@ -570,7 +582,7 @@ describe("offer drafts", () => {
       });
       assert.equal(priced.status, 302);
       const offers = Object.values(diskOffers(recordsPath)).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-      const second = offers[1];
+      const second = versionOf(offers[1]);
       assert.equal(second.terms.baseMinor, 1999);
       assert.equal(second.terms.markup.minor, 29);
       assert.equal(second.terms.buyerMinor, 2028);
@@ -583,7 +595,7 @@ describe("offer drafts", () => {
         ...sellerFields({ markupType: "percent", markupValue: "2.5" }),
       });
       assert.equal(percent.status, 302);
-      const third = Object.values(diskOffers(recordsPath)).find((offer) => offer.terms.baseMinor === 10000);
+      const third = versionOf(Object.values(diskOffers(recordsPath)).find((offer) => versionOf(offer).terms.baseMinor === 10000));
       assert.equal(third.terms.markup.bps, 250);
       assert.equal(third.terms.buyerMinor, 10250);
 
@@ -627,7 +639,7 @@ describe("offer drafts", () => {
         ...sellerFields({ currency: "JPY", markupType: "percent", markupValue: "0" }),
       });
       assert.equal(saved.status, 302);
-      const offer = onlyOffer(recordsPath);
+      const offer = versionOf(onlyOffer(recordsPath));
       assert.equal(offer.terms.currency, "JPY");
       assert.equal(offer.snapshot.baseAmount, 1500);
       assert.equal(offer.terms.baseMinor, 1500);
@@ -769,6 +781,57 @@ describe("offer drafts", () => {
       assertMarkupEscaped(list.html, ["RN-SHARE"], "list");
       assert.equal(list.html.includes("RN-NOTES"), false);
       assert.equal(list.html.includes(MARKUP), false);
+
+      const versionList = preview.html.slice(preview.html.indexOf('id="version-list"'), preview.html.indexOf("</ol>", preview.html.indexOf('id="version-list"')));
+      assertMarkupEscaped(versionList, ["RN-SHARE"], "version list");
+      const edit = await pageOf(base, cookie, `${saved.headers.get("location")}/edit`);
+      assert.equal(edit.response.status, 200);
+      assertMarkupEscaped(edit.html, ["RN-CARRIER", "RN-NOTES", "RN-SHARE", "RN-TERMS"], "edit form");
+      assert.equal(edit.html.includes('name="baseMinor"'), false);
+      assert.equal(edit.html.includes('name="snapshot"'), false);
+      const published = await postForm(base, cookie, `${saved.headers.get("location")}/state`, {
+        csrf_token: preview.csrf,
+        to: "published",
+      });
+      assert.equal(published.status, 302);
+      const editAgain = await pageOf(base, cookie, `${saved.headers.get("location")}/edit`);
+      const changed = await postForm(base, cookie, `${saved.headers.get("location")}/edit`, {
+        csrf_token: editAgain.csrf,
+        source: "rn_rate",
+        equipment: "40HC",
+        ...sellerFields({
+          operatingCarrier: "Plain Carrier",
+          codeShareName: "Safe Name",
+          serviceTerms: "Plain terms",
+        }),
+      });
+      assert.equal(changed.status, 302);
+      const after = await pageOf(base, cookie, saved.headers.get("location"));
+      const diffList = after.html.slice(after.html.indexOf('id="version-list"'), after.html.indexOf("</ol>", after.html.indexOf('id="version-list"')));
+      assertMarkupEscaped(diffList, ["RN-SHARE", "RN-CARRIER", "RN-TERMS"], "version diff");
+    });
+  });
+
+  it("re-renders the create form with typed values when Rate Ninja limits the save", async () => {
+    await withApp({ rates: [rateRow("rate-hc-a")] }, async ({ base, origin, mock, recordsPath }) => {
+      const { cookie } = await connectOwner({ base, origin });
+      const form = await pageOf(base, cookie, "/offers/new?source=rn_rate&rateId=rate-hc-a&equipment=40HC");
+      mock.failNextPartner(429);
+      const saved = await postForm(base, cookie, "/offers", {
+        csrf_token: form.csrf,
+        source: "rn_rate",
+        rateId: "rate-hc-a",
+        equipment: "40HC",
+        ...sellerFields({ codeShareName: "Kept Share", quantity: "6" }),
+      });
+      assert.equal(saved.status, 200);
+      const html = await saved.text();
+      assert.match(html, /Rate Ninja is limiting requests\. Try again in a minute\./);
+      assert.match(html, /value="Kept Share"/);
+      assert.match(html, /value="6"/);
+      assert.match(html, /name="codeShareName"/);
+      assert.equal(html.includes("Enter an offer by hand"), false);
+      assert.equal(Object.keys(diskOffers(recordsPath)).length, 0);
     });
   });
 });
