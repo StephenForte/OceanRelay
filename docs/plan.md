@@ -118,7 +118,7 @@ Planned split, subject to revision after Phase 3 lands:
 | T9 | Marketplace search and filters, buyer offer page (published, non-expired, current version via `buyerView`), and the buyer-view formatting fixes from the A-3 screenshot (§7), plus F-8 (rate chooser search and filters, §7 O-9) | Blocked on T5. New id; ids are never renumbered. |
 | T6 | Requests, accept/decline/counter, availability accounting. F-3 decided as D-13 (buyer-terms hash). Blocked on T9. | The concurrency task. D-3's synchronous-mutation rule is the core invariant; test with overlapping requests. |
 | T7 | Post-acceptance carrier statuses, cancellation, dispute state | Mutual-cancel or unresolved dispute only (PRD Phase 4). |
-| T8 | Audit log and operator review screen | Operator identity is an open question: the PRD has an operator role but no way to authenticate one. Decide before T8's prompt (candidate: allowlist of Rate Ninja `sub` values in config). |
+| T8 | Audit log and operator review screen | Operator identity decided as D-16 (`OCEANRELAY_OPERATOR_SUBS`). T8 also shows users their Rate Ninja `sub`. |
 | A-4 | Phase 4 acceptance with accounts O-4(a) and O-4(c) | |
 
 T5, T9 and T6 all touch the offer record; run them in sequence: T5 → T9 → T6.
@@ -402,7 +402,7 @@ Buyer-view issues seen in the screenshot. Cosmetic; they do not fail A-3. Assign
 
 ### Open operator questions
 
-- **O-8, operator identity (for T8):** the PRD's "prototype operator" reviews records and
+- **O-8, operator identity (for T8): decided 2026-09-29 as D-16 (env var allowlist for the pilot).** the PRD's "prototype operator" reviews records and
   cannot silently change accepted terms, but OceanRelay has no way to tell who the operator
   is: everyone signs in through Rate Ninja as a contract owner. Planner recommendation: an
   env var `OCEANRELAY_OPERATOR_SUBS` listing the Rate Ninja user ids (`sub`) allowed into
