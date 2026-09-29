@@ -115,7 +115,7 @@ Planned split, subject to revision after Phase 3 lands:
 | Id | Task | Notes |
 | --- | --- | --- |
 | T5 | Offer versions (C-7, M-2), records `view` (C-6), edit, publish/pause, derived expiry (D-14, D-15), F-6, F-7 | **ready** — `docs/prompts/T5-versions-publish.md`. Split on 2026-09-29: marketplace and buyer page moved to T9. |
-| T9 | Marketplace search and filters, buyer offer page (published, non-expired, current version via `buyerView`), and the buyer-view formatting fixes from the A-3 screenshot (below) | Blocked on T5. New id; ids are never renumbered. |
+| T9 | Marketplace search and filters, buyer offer page (published, non-expired, current version via `buyerView`), and the buyer-view formatting fixes from the A-3 screenshot (§7), plus F-8 (rate chooser search and filters, §7 O-9) | Blocked on T5. New id; ids are never renumbered. |
 | T6 | Requests, accept/decline/counter, availability accounting. F-3 decided as D-13 (buyer-terms hash). Blocked on T9. | The concurrency task. D-3's synchronous-mutation rule is the core invariant; test with overlapping requests. |
 | T7 | Post-acceptance carrier statuses, cancellation, dispute state | Mutual-cancel or unresolved dispute only (PRD Phase 4). |
 | T8 | Audit log and operator review screen | Operator identity is an open question: the PRD has an operator role but no way to authenticate one. Decide before T8's prompt (candidate: allowlist of Rate Ninja `sub` values in config). |
@@ -400,6 +400,9 @@ Buyer-view issues seen in the screenshot. Cosmetic; they do not fail A-3. Assign
   env var `OCEANRELAY_OPERATOR_SUBS` listing the Rate Ninja user ids (`sub`) allowed into
   operator screens. It is checked server-side on every operator route and shown on
   `/config` as a count, never the ids. Awaiting operator confirmation; not needed until T8.
-- **O-9, "make it easier to add the rates":** ambiguous; asked 2026-09-29. OceanRelay does
-  not create Rate Ninja rates (PRD Phase 1: later phases add no Rate Ninja features), and
-  Rate Ninja exposes no rate-entry API to partners.
+- **O-9, "make it easier to add the rates": answered (b), 2026-09-29.** The request is about
+  picking a rate inside OceanRelay, not entering rates in Rate Ninja. Assigned to T9 as
+  **F-8**: the `/offers/new` rate chooser gets search and filters (origin, destination,
+  carrier, equipment with a price), hides rates already expired by default (with a toggle
+  to show them), and sorts by expiration date. Filtering runs over the rates already
+  fetched by `listAllRates`; it adds no new Rate Ninja calls and no Rate Ninja features.
