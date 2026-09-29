@@ -115,7 +115,7 @@ Planned split, subject to revision after Phase 3 lands:
 | Id | Task | Notes |
 | --- | --- | --- |
 | T5 | Offer versions (C-7, M-2), records `view` (C-6), edit, publish/pause, derived expiry (D-14, D-15), F-6, F-7 | **approved 2026-09-29, PR #18 at `df275bf`** (review in §6) — `docs/prompts/T5-versions-publish.md`. Split on 2026-09-29: marketplace and buyer page moved to T9. |
-| T9 | Marketplace search and filters, F-9 and F-10 from the T5 review, buyer offer page (published, non-expired, current version via `buyerView`), and the buyer-view formatting fixes from the A-3 screenshot (§7), plus F-8 (rate chooser search and filters, §7 O-9) | Blocked on T5. New id; ids are never renumbered. |
+| T9 | **ready** — `docs/prompts/T9-marketplace.md`. Marketplace search and filters (D-17, C-8), F-9 and F-10 from the T5 review, operator-reported usability fixes (§7, 2026-09-29), buyer offer page (published, non-expired, current version via `buyerView`), and the buyer-view formatting fixes from the A-3 screenshot (§7), plus F-8 (rate chooser search and filters, §7 O-9) | Blocked on T5. New id; ids are never renumbered. |
 | T6 | Requests, accept/decline/counter, availability accounting. F-3 decided as D-13 (buyer-terms hash). Blocked on T9. | The concurrency task. D-3's synchronous-mutation rule is the core invariant; test with overlapping requests. |
 | T7 | Post-acceptance carrier statuses, cancellation, dispute state | Mutual-cancel or unresolved dispute only (PRD Phase 4). |
 | T8 | Audit log and operator review screen | Operator identity decided as D-16 (`OCEANRELAY_OPERATOR_SUBS`). T8 also shows users their Rate Ninja `sub`. |
@@ -468,3 +468,33 @@ Buyer-view issues seen in the screenshot. Cosmetic; they do not fail A-3. Assign
   carrier, equipment with a price), hides rates already expired by default (with a toggle
   to show them), and sorts by expiration date. Filtering runs over the rates already
   fetched by `listAllRates`; it adds no new Rate Ninja calls and no Rate Ninja features.
+
+### Operator report after T5 deploy, 2026-09-29
+
+The migration worked on the deployed service: the offers list loads, and an offer shows
+"published · version 1". The operator reported four problems. Each one was reproduced
+locally against `main` at `eb3467b`, using the mock Rate Ninja:
+
+1. **"Version 1 did not go to version 2 after an edit."** Not reproduced. Locally, an
+   edit after publishing creates v2 with v1 unchanged. Likely explanation: the edit was
+   made before publishing, which updates version 1 in place by design (D-15). The
+   screenshot, "Bob's Big containers … published · version 1", fits that order. **Asked
+   the operator** for the order. T9 adds a note on the draft edit page and a version and
+   state history on the preview, so this is visible.
+2. **"No manual way to enter an offer."** Confirmed as a layout problem, not a
+   regression. The "Enter an offer by hand" link is rendered below the full rate list
+   (`lib/views/offers.js`, `renderChooser`), so it is off-screen for an account with many
+   rates. T9 moves it to the top.
+3. **"Added another offer, only the first is listed."** Not reproduced. Locally, two
+   creates give two listed offers, both on disk. Likely explanation: a failed validation
+   re-rendered the form (errors appear only beside fields, with no summary), and it
+   looked like a save. **Asked the operator** what page appeared after saving. T9 adds an
+   error summary ("Not saved …") at the top of the form and a "Saved" banner on the
+   preview. **If the operator confirms the preview appeared and the offer is still
+   missing, this becomes a data-loss investigation ahead of T9.**
+4. **O-2:** the operator believes revoke is done. Asked for clarification. Disconnecting
+   in OceanRelay revokes at Rate Ninja, which is O-1, done. O-2 is the reverse: revoking
+   from Rate Ninja's side and seeing OceanRelay become disconnected.
+
+The second screenshot also shows the raw `seller_asserted` in the seller's list. The
+label fix goes to T9 alongside the buyer-panel fixes.
