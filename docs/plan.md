@@ -84,7 +84,7 @@ Status values: `ready` (prompt written, can dispatch), `blocked-on <x>`, `dispat
 | Id | Check on the deployed service | Status |
 | --- | --- | --- |
 | O-1 | Disconnect: connected owner clicks Disconnect; page shows Disconnected; reconnect works. | done 2026-09-29 |
-| O-2 | Revoke: revoke OceanRelay in Rate Ninja consents; wait 10+ minutes (access token lifetime); reload OceanRelay; it shows Disconnected (refresh fails with `invalid_grant`). | open |
+| O-2 | Revoke: revoke OceanRelay in Rate Ninja consents; wait 10+ minutes (access token lifetime); reload OceanRelay; it shows Disconnected (refresh fails with `invalid_grant`). | done 2026-09-29 (operator ran both directions) |
 | O-3 | Refused company: a Freight Forwarder/Customer account attempts Connect and sees the contract-owner-only message. | open |
 | O-4 | **Provision test accounts on Rate Ninja** now, because Phases 3–4 cannot be accepted without them: (a) contract owner with rates — exists; (b) contract owner with no rates; (c) a second contract owner at a **different company** (Phase 4 buyer); (d) a customer-company account for O-3. | open — (c) in progress; operator reports it is not simple to set up (2026-09-29) |
 | O-5 | Confirm the Node version the Render service runs (Render dashboard or `NODE_VERSION` env). Needs ≥ 20.12. | open |
@@ -103,7 +103,7 @@ Status values: `ready` (prompt written, can dispatch), `blocked-on <x>`, `dispat
 | Id | Task | Owns | Model | Status |
 | --- | --- | --- | --- | --- |
 | T4 | Offer draft + preview, rate-based and manual; source-rate change/expiry warning. **Also carries F-1, F-2, F-4, F-5** (§6). | `lib/routes/offers.js`, `lib/views/offers.js`, offer methods in `lib/records.js`, `test/offers.test.js` | strong | merged `d7b3fd8` 2026-09-28, PR #14 at `40278e5` (review in §6) |
-| A-3 | **Phase 3 acceptance (operator, deployed):** owner with rates saves and previews an offer from a rate; owner with no rates saves and previews a manual offer; both previews say quantity is the seller's claim. Requires O-1, O-2, O-4(b). | — | — | blocked-on T4 |
+| A-3 | **Phase 3 acceptance (operator, deployed): accepted 2026-09-29 with one deferred check (a no-rates owner's manual offer; see §7).** owner with rates saves and previews an offer from a rate; owner with no rates saves and previews a manual offer; both previews say quantity is the seller's claim. Requires O-1, O-2, O-4(b). | — | — | blocked-on T4 |
 
 T4's prompt is written when Wave A has merged, against the contracts as merged, not as
 planned.
@@ -115,7 +115,7 @@ Planned split, subject to revision after Phase 3 lands:
 | Id | Task | Notes |
 | --- | --- | --- |
 | T5 | Offer versions (C-7, M-2), records `view` (C-6), edit, publish/pause, derived expiry (D-14, D-15), F-6, F-7 | **approved 2026-09-29, PR #18 at `df275bf`** (review in §6) — `docs/prompts/T5-versions-publish.md`. Split on 2026-09-29: marketplace and buyer page moved to T9. |
-| T9 | Marketplace search and filters, F-9 and F-10 from the T5 review, buyer offer page (published, non-expired, current version via `buyerView`), and the buyer-view formatting fixes from the A-3 screenshot (§7), plus F-8 (rate chooser search and filters, §7 O-9) | Blocked on T5. New id; ids are never renumbered. |
+| T9 | **ready** — `docs/prompts/T9-marketplace.md`. Marketplace search and filters (D-17, C-8), F-9 and F-10 from the T5 review, operator-reported usability fixes (§7, 2026-09-29), buyer offer page (published, non-expired, current version via `buyerView`), and the buyer-view formatting fixes from the A-3 screenshot (§7), plus F-8 (rate chooser search and filters, §7 O-9) | Blocked on T5. New id; ids are never renumbered. |
 | T6 | Requests, accept/decline/counter, availability accounting. F-3 decided as D-13 (buyer-terms hash). Blocked on T9. | The concurrency task. D-3's synchronous-mutation rule is the core invariant; test with overlapping requests. |
 | T7 | Post-acceptance carrier statuses, cancellation, dispute state | Mutual-cancel or unresolved dispute only (PRD Phase 4). |
 | T8 | Audit log and operator review screen | Operator identity decided as D-16 (`OCEANRELAY_OPERATOR_SUBS`). T8 also shows users their Rate Ninja `sub`. |
@@ -468,3 +468,55 @@ Buyer-view issues seen in the screenshot. Cosmetic; they do not fail A-3. Assign
   carrier, equipment with a price), hides rates already expired by default (with a toggle
   to show them), and sorts by expiration date. Filtering runs over the rates already
   fetched by `listAllRates`; it adds no new Rate Ninja calls and no Rate Ninja features.
+
+### Operator report after T5 deploy, 2026-09-29
+
+The migration worked on the deployed service: the offers list loads, and an offer shows
+"published · version 1". The operator reported four problems. Each one was reproduced
+locally against `main` at `eb3467b`, using the mock Rate Ninja:
+
+1. **"Version 1 did not go to version 2 after an edit."** Not reproduced. Locally, an
+   edit after publishing creates v2 with v1 unchanged. Likely explanation: the edit was
+   made before publishing, which updates version 1 in place by design (D-15). The
+   screenshot, "Bob's Big containers … published · version 1", fits that order. **Asked
+   the operator** for the order. T9 adds a note on the draft edit page and a version and
+   state history on the preview, so this is visible.
+2. **"No manual way to enter an offer."** Confirmed as a layout problem, not a
+   regression. The "Enter an offer by hand" link is rendered below the full rate list
+   (`lib/views/offers.js`, `renderChooser`), so it is off-screen for an account with many
+   rates. T9 moves it to the top.
+3. **"Added another offer, only the first is listed."** Not reproduced. Locally, two
+   creates give two listed offers, both on disk. Likely explanation: a failed validation
+   re-rendered the form (errors appear only beside fields, with no summary), and it
+   looked like a save. **Asked the operator** what page appeared after saving. T9 adds an
+   error summary ("Not saved …") at the top of the form and a "Saved" banner on the
+   preview. **If the operator confirms the preview appeared and the offer is still
+   missing, this becomes a data-loss investigation ahead of T9.**
+4. **O-2:** the operator believes revoke is done. Asked for clarification. Disconnecting
+   in OceanRelay revokes at Rate Ninja, which is O-1, done. O-2 is the reverse: revoking
+   from Rate Ninja's side and seeing OceanRelay become disconnected.
+
+The second screenshot also shows the raw `seller_asserted` in the seller's list. The
+label fix goes to T9 alongside the buyer-panel fixes.
+
+### Operator follow-up, 2026-09-29 (later the same day)
+
+- **O-2: done.** The operator ran both directions.
+- **Items 1 and 3 of the post-T5 report are resolved as operator flow, not defects.**
+  The operator created a rate-based offer ("Booya", Tanjung Pelepas → LALB) and a manual
+  offer ("Manual Airlines", Hong Kong → Long Beach). Both are listed alongside "Bob's Big
+  containers", so there are now three published offers at version 1. The operator thinks
+  the earlier attempt was not published. **Note:** drafts appear in "Your offers" too, so
+  an unpublished draft would still have been listed. The missing offer was most likely a
+  save that did not go through (a validation re-render). T9's "Not saved" summary and
+  "Saved" banner cover this. There is no evidence of data loss: new creates persist and
+  list correctly on the deployed service.
+- **A-3:** rate-based offer, O-1 and O-2 are done, and a manual offer was saved and
+  previewed. **One PRD criterion is not yet met on the live service:** Phase 3 asks for
+  the manual offer from "a contract owner with no rates". The operator's account has
+  rates, so Rate Ninja's empty-list path (an empty 200, shown as "no rates, enter by
+  hand") has only been exercised against the mock.
+- **Planner recommendation, to cut account-setup work:** a single new Rate Ninja contract
+  owner **at a different company, with no rates** satisfies both O-4(b) (the no-rates
+  check for A-3) and O-4(c) (the second company for the Phase 4 acceptance, A-4). Phase 3
+  is marked **accepted with one deferred check**, which is run when that account exists.

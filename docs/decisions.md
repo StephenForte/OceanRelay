@@ -169,6 +169,20 @@ to name the first admin.
 T8 must show the signed-in user their Rate Ninja `sub` on the home page, so the value
 can be copied into the setting.
 
+### D-17 — The marketplace is a separate, signed-in read path (2026-09-29)
+
+Other companies read offers only through `/market` and `/market/:id`. Those routes are
+built solely from `buyerView` of the offer's current version.
+- **Who can see it:** any connected contract owner (`requireIdentity`). There is no public
+  or anonymous view (PRD: no marketplace without a Rate Ninja account).
+- **What is listed:** an offer appears only when its stored state is `published`, it is
+  not derived-expired (D-14), and its current version is `frozen`.
+- **Everything else is 404:** draft, paused, expired and unknown ids get the same 404 body.
+- **Seller routes are unchanged:** `/offers/:id` stays seller-only (D-12).
+- **Seller identity:** the seller's company name and user are not shown to buyers in T9.
+  Whether buyers see the seller's company is left to T6, where both identities are
+  recorded on acceptance.
+
 ## Interface contracts
 
 A contract is the surface other tasks build on. The task named as owner publishes it; later
@@ -282,3 +296,16 @@ empty.
 Before the first write, M-2 copies the v1 file byte-for-byte to `<path>.pre-m2.bak`
 (mode 0600, never overwritten if it already exists). Unknown top-level keys are kept.
 `schemaVersion` above 2 throws.
+
+### C-8 — Market query (owner: T9)
+
+`lib/market.js`, pure, no I/O:
+- `filterMarket(entries, query, today)` → the matching entries, sorted by sailing start and
+  then by id.
+- `entries` are `{ id, version: <n>, view: buyerView(currentVersion), companyId }`, built by
+  `records.listPublishedOffers(today)` (a C-6 `view` read).
+- `query` holds optional `origin`, `destination`, `carrier` (case-insensitive substring),
+  `equipment`, `from` and `to` (the sailing window overlaps [from, to]), `maxPrice` with
+  `currency` (compared in minor units, same currency only), and `capacityStatus`.
+- Unknown query keys are ignored.
+- `companyId` is used only to mark "your offer". It is never rendered.
