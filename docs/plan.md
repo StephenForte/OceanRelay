@@ -84,7 +84,7 @@ Status values: `ready` (prompt written, can dispatch), `blocked-on <x>`, `dispat
 | Id | Check on the deployed service | Status |
 | --- | --- | --- |
 | O-1 | Disconnect: connected owner clicks Disconnect; page shows Disconnected; reconnect works. | done 2026-09-29 |
-| O-2 | Revoke: revoke OceanRelay in Rate Ninja consents; wait 10+ minutes (access token lifetime); reload OceanRelay; it shows Disconnected (refresh fails with `invalid_grant`). | open |
+| O-2 | Revoke: revoke OceanRelay in Rate Ninja consents; wait 10+ minutes (access token lifetime); reload OceanRelay; it shows Disconnected (refresh fails with `invalid_grant`). | done 2026-09-29 (operator ran both directions) |
 | O-3 | Refused company: a Freight Forwarder/Customer account attempts Connect and sees the contract-owner-only message. | open |
 | O-4 | **Provision test accounts on Rate Ninja** now, because Phases 3–4 cannot be accepted without them: (a) contract owner with rates — exists; (b) contract owner with no rates; (c) a second contract owner at a **different company** (Phase 4 buyer); (d) a customer-company account for O-3. | open — (c) in progress; operator reports it is not simple to set up (2026-09-29) |
 | O-5 | Confirm the Node version the Render service runs (Render dashboard or `NODE_VERSION` env). Needs ≥ 20.12. | open |
@@ -103,7 +103,7 @@ Status values: `ready` (prompt written, can dispatch), `blocked-on <x>`, `dispat
 | Id | Task | Owns | Model | Status |
 | --- | --- | --- | --- | --- |
 | T4 | Offer draft + preview, rate-based and manual; source-rate change/expiry warning. **Also carries F-1, F-2, F-4, F-5** (§6). | `lib/routes/offers.js`, `lib/views/offers.js`, offer methods in `lib/records.js`, `test/offers.test.js` | strong | merged `d7b3fd8` 2026-09-28, PR #14 at `40278e5` (review in §6) |
-| A-3 | **Phase 3 acceptance (operator, deployed):** owner with rates saves and previews an offer from a rate; owner with no rates saves and previews a manual offer; both previews say quantity is the seller's claim. Requires O-1, O-2, O-4(b). | — | — | blocked-on T4 |
+| A-3 | **Phase 3 acceptance (operator, deployed): accepted 2026-09-29 with one deferred check (a no-rates owner's manual offer; see §7).** owner with rates saves and previews an offer from a rate; owner with no rates saves and previews a manual offer; both previews say quantity is the seller's claim. Requires O-1, O-2, O-4(b). | — | — | blocked-on T4 |
 
 T4's prompt is written when Wave A has merged, against the contracts as merged, not as
 planned.
@@ -498,3 +498,25 @@ locally against `main` at `eb3467b`, using the mock Rate Ninja:
 
 The second screenshot also shows the raw `seller_asserted` in the seller's list. The
 label fix goes to T9 alongside the buyer-panel fixes.
+
+### Operator follow-up, 2026-09-29 (later the same day)
+
+- **O-2: done.** The operator ran both directions.
+- **Items 1 and 3 of the post-T5 report are resolved as operator flow, not defects.**
+  The operator created a rate-based offer ("Booya", Tanjung Pelepas → LALB) and a manual
+  offer ("Manual Airlines", Hong Kong → Long Beach). Both are listed alongside "Bob's Big
+  containers", so there are now three published offers at version 1. The operator thinks
+  the earlier attempt was not published. **Note:** drafts appear in "Your offers" too, so
+  an unpublished draft would still have been listed. The missing offer was most likely a
+  save that did not go through (a validation re-render). T9's "Not saved" summary and
+  "Saved" banner cover this. There is no evidence of data loss: new creates persist and
+  list correctly on the deployed service.
+- **A-3:** rate-based offer, O-1 and O-2 are done, and a manual offer was saved and
+  previewed. **One PRD criterion is not yet met on the live service:** Phase 3 asks for
+  the manual offer from "a contract owner with no rates". The operator's account has
+  rates, so Rate Ninja's empty-list path (an empty 200, shown as "no rates, enter by
+  hand") has only been exercised against the mock.
+- **Planner recommendation, to cut account-setup work:** a single new Rate Ninja contract
+  owner **at a different company, with no rates** satisfies both O-4(b) (the no-rates
+  check for A-3) and O-4(c) (the second company for the Phase 4 acceptance, A-4). Phase 3
+  is marked **accepted with one deferred check**, which is run when that account exists.
