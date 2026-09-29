@@ -102,7 +102,7 @@ Status values: `ready` (prompt written, can dispatch), `blocked-on <x>`, `dispat
 
 | Id | Task | Owns | Model | Status |
 | --- | --- | --- | --- | --- |
-| T4 | Offer draft + preview, rate-based and manual; source-rate change/expiry warning. **Also carries F-1, F-2, F-4, F-5** (§6). | `lib/routes/offers.js`, `lib/views/offers.js`, offer methods in `lib/records.js`, `test/offers.test.js` | strong | approved 2026-09-28 after one fix round, PR #14 at `40278e5` (review in §6) |
+| T4 | Offer draft + preview, rate-based and manual; source-rate change/expiry warning. **Also carries F-1, F-2, F-4, F-5** (§6). | `lib/routes/offers.js`, `lib/views/offers.js`, offer methods in `lib/records.js`, `test/offers.test.js` | strong | merged `d7b3fd8` 2026-09-28, PR #14 at `40278e5` (review in §6) |
 | A-3 | **Phase 3 acceptance (operator, deployed):** owner with rates saves and previews an offer from a rate; owner with no rates saves and previews a manual offer; both previews say quantity is the seller's claim. Requires O-1, O-2, O-4(b). | — | — | blocked-on T4 |
 
 T4's prompt is written when Wave A has merged, against the contracts as merged, not as
@@ -114,13 +114,14 @@ Planned split, subject to revision after Phase 3 lands:
 
 | Id | Task | Notes |
 | --- | --- | --- |
-| T5 | Offer versions, publish/pause/expire, marketplace search, buyer view | Introduces `offer_versions`; migration **M-2**. |
-| T6 | Requests, accept/decline/counter, availability accounting. **Blocked on F-3** (§6). | The concurrency task. D-3's synchronous-mutation rule is the core invariant; test with overlapping requests. |
+| T5 | Offer versions (C-7, M-2), records `view` (C-6), edit, publish/pause, derived expiry (D-14, D-15), F-6, F-7 | **ready** — `docs/prompts/T5-versions-publish.md`. Split on 2026-09-29: marketplace and buyer page moved to T9. |
+| T9 | Marketplace search and filters, buyer offer page (published, non-expired, current version via `buyerView`), and the buyer-view formatting fixes from the A-3 screenshot (below) | Blocked on T5. New id; ids are never renumbered. |
+| T6 | Requests, accept/decline/counter, availability accounting. F-3 decided as D-13 (buyer-terms hash). Blocked on T9. | The concurrency task. D-3's synchronous-mutation rule is the core invariant; test with overlapping requests. |
 | T7 | Post-acceptance carrier statuses, cancellation, dispute state | Mutual-cancel or unresolved dispute only (PRD Phase 4). |
 | T8 | Audit log and operator review screen | Operator identity is an open question: the PRD has an operator role but no way to authenticate one. Decide before T8's prompt (candidate: allowlist of Rate Ninja `sub` values in config). |
 | A-4 | Phase 4 acceptance with accounts O-4(a) and O-4(c) | |
 
-T5 and T6 both touch the offer record; run them in sequence, not parallel.
+T5, T9 and T6 all touch the offer record; run them in sequence: T5 → T9 → T6.
 
 ### Phase 5 and 6 — not planned yet
 
@@ -369,3 +370,36 @@ Follow-ups opened:
   99 pass / 1 fail ("chooser rendered raw markup"). Restored, it is 100/0.
 - The worker put its response in the PR description, not a comment. It matches the
   branch.
+
+---
+
+## 7. Operator reports
+
+### A-3 (Phase 3 acceptance), partial, 2026-09-29
+
+The operator sent a screenshot of the buyer panel of an offer on oceanrelay.ai:
+"Bob's containers, operated by CMA", Penang → Savannah, 40D, 100 containers, sailing
+2026-10-01 to 2026-10-31, buyer price 12046.00 USD. It shows "Seller-provided. Not a
+carrier endorsement." and "Quantity is the seller's claim. OceanRelay has not confirmed
+the space." Both required statements are present. **Not yet reported:** whether this
+offer was rate-based or manual, the manual offer from a no-rates account (O-4(b)), and
+O-1 and O-2. A-3 stays open until those are confirmed.
+
+Buyer-view issues seen in the screenshot. Cosmetic; they do not fail A-3. Assigned to T9:
+- The price shows minor units to the buyer ("12046.00 USD (1204600 minor units)"). Show
+  "12,046.00 USD" and keep minor units out of the buyer panel.
+- Capacity shows the raw enum `seller_asserted`. Use a label ("Seller-asserted").
+- An empty Cutoff row is shown. Show "Not stated" or omit the row.
+- "100 container": pluralise the unit.
+
+### Open operator questions
+
+- **O-8, operator identity (for T8):** the PRD's "prototype operator" reviews records and
+  cannot silently change accepted terms, but OceanRelay has no way to tell who the operator
+  is: everyone signs in through Rate Ninja as a contract owner. Planner recommendation: an
+  env var `OCEANRELAY_OPERATOR_SUBS` listing the Rate Ninja user ids (`sub`) allowed into
+  operator screens. It is checked server-side on every operator route and shown on
+  `/config` as a count, never the ids. Awaiting operator confirmation; not needed until T8.
+- **O-9, "make it easier to add the rates":** ambiguous; asked 2026-09-29. OceanRelay does
+  not create Rate Ninja rates (PRD Phase 1: later phases add no Rate Ninja features), and
+  Rate Ninja exposes no rate-entry API to partners.

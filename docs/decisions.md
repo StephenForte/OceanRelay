@@ -119,6 +119,32 @@ company returns the same 404 as an id that does not exist, so ids cannot be prob
 existence. This applies to every offer route until Phase 4 introduces published,
 buyer-visible offers (T5), which get their own read path through `buyerView`.
 
+### D-13 — Acceptances hash only the terms the buyer saw (2026-09-29, operator decision on F-3)
+
+The terms hash an acceptance records (Phase 4) and the commitment written on chain
+(Phase 5) cover **buyer-visible terms only**: the fields `buyerView` exposes. They exclude
+the seller's `baseMinor`, `markup`, snapshot and source record id. `canonicalTerms` v1
+(C-4) stays as it is and stays server-side. T6 adds a separate buyer-terms canonical form
+under a new contract number. Reason: the buyer agreed to what they saw, and an unsalted
+hash over the buy rate and markup could be reversed by enumeration.
+
+### D-14 — Expiry is computed when an offer is read, not stored (2026-09-29)
+
+A published or paused offer whose current version's validity deadline is before today
+(UTC) reads as `expired`. No background job flips the stored state. Stored states are
+`draft`, `published` and `paused`. `expired` is derived, and an expired offer cannot be
+published, resumed or requested.
+
+### D-15 — Offer versions: frozen at first publish, edits and status changes append (2026-09-29)
+
+An offer has an ordered list of versions. Until the offer is first published, its only
+version may be edited in place, because nobody else has seen it. Publishing freezes that
+version. After that, every change a buyer could see appends a new version and makes it
+current: an edit, or a capacity-status change. That keeps every published version
+immutable, which T6 relies on ("an edit is a new version"). An edit keeps the version's
+Rate Ninja snapshot and `baseMinor` (D-11). Repricing from a changed rate means creating
+a new offer; T5 adds no refresh-from-Rate-Ninja action.
+
 ## Interface contracts
 
 A contract is the surface other tasks build on. The task named as owner publishes it; later
@@ -174,7 +200,7 @@ As merged in T3, C-4 also exports `sourceWarnings`, `SELLER_CLAIM_CAVEAT`,
 The field set hashed by `canonicalTerms` v1 is listed in the comment above that function in
 `lib/offer-domain.js`. Whether acceptances use it is open (plan §6, F-3).
 
-### C-5 — Offer record (owner: T4)
+### C-5 — Offer record (owner: T4) — *superseded by C-7 (2026-09-29, versions added in T5)*
 
 Stored in `records.offers[id]` (schema v1, no migration: `offers` already exists).
 
@@ -197,3 +223,38 @@ Stored in `records.offers[id]` (schema v1, no migration: `offers` already exists
 `getCompanyOffer(companyId, id)` (null for another company's offer),
 `setCapacityStatus(companyId, id, to, actorSub)` (checks `canChangeCapacityStatus`
 inside the transaction). T5 adds versions (migration M-2) on top of this shape.
+
+### C-6 — Records read path (owner: T5)
+
+`records.view(fn)` runs `fn` over a deep copy of the current data, synchronously, and
+never persists. It throws on an async `fn`, just as `transact` does. All read-only record
+methods use `view`; `transact` is only for changes. Closes F-6.
+
+### C-7 — Versioned offer record, schema v2 (owner: T5; supersedes C-5)
+
+Records file `schemaVersion: 2`, produced from v1 by migration **M-2**.
+
+```
+{
+  id, companyId, createdBy, createdAt,
+  state: "draft" | "published" | "paused",   // "expired" is derived (D-14)
+  publishedAt: ISO | null,
+  currentVersion: <n>,
+  versions: [
+    { n, createdAt, createdBy, source, terms, snapshot, sourceRecordId,
+      overriddenFields, capacityStatus, frozen: bool }
+  ],
+  statusHistory: [{ from, to, actor, at, version }],   // capacity status, all versions
+  stateHistory:  [{ from, to, actor, at }]             // draft/published/paused
+}
+```
+
+M-2 turns each v1 offer into one with `state: "draft"`, `publishedAt: null`,
+`currentVersion: 1`, and a single unfrozen version 1 carrying the v1 `source`, `terms`,
+`snapshot`, `sourceRecordId`, `overriddenFields`, `capacityStatus`, `createdAt` and
+`createdBy`. The v1 `statusHistory` entries gain `version: 1`, and `stateHistory` starts
+empty.
+
+Before the first write, M-2 copies the v1 file byte-for-byte to `<path>.pre-m2.bak`
+(mode 0600, never overwritten if it already exists). Unknown top-level keys are kept.
+`schemaVersion` above 2 throws.
