@@ -83,10 +83,10 @@ Status values: `ready` (prompt written, can dispatch), `blocked-on <x>`, `dispat
 
 | Id | Check on the deployed service | Status |
 | --- | --- | --- |
-| O-1 | Disconnect: connected owner clicks Disconnect; page shows Disconnected; reconnect works. | open |
+| O-1 | Disconnect: connected owner clicks Disconnect; page shows Disconnected; reconnect works. | done 2026-09-29 |
 | O-2 | Revoke: revoke OceanRelay in Rate Ninja consents; wait 10+ minutes (access token lifetime); reload OceanRelay; it shows Disconnected (refresh fails with `invalid_grant`). | open |
 | O-3 | Refused company: a Freight Forwarder/Customer account attempts Connect and sees the contract-owner-only message. | open |
-| O-4 | **Provision test accounts on Rate Ninja** now, because Phases 3–4 cannot be accepted without them: (a) contract owner with rates — exists; (b) contract owner with no rates; (c) a second contract owner at a **different company** (Phase 4 buyer); (d) a customer-company account for O-3. | open |
+| O-4 | **Provision test accounts on Rate Ninja** now, because Phases 3–4 cannot be accepted without them: (a) contract owner with rates — exists; (b) contract owner with no rates; (c) a second contract owner at a **different company** (Phase 4 buyer); (d) a customer-company account for O-3. | open — (c) in progress; operator reports it is not simple to set up (2026-09-29) |
 | O-5 | Confirm the Node version the Render service runs (Render dashboard or `NODE_VERSION` env). Needs ≥ 20.12. | open |
 | O-6 | **Done 2026-09-28 (operator verified /config).** Before merging PR #6: set `OCEANRELAY_RECORDS_PATH=/var/data/oceanrelay-records.json` on the Render service, the same persistent disk as the token store. The default `data/oceanrelay-records.json` is on Render's ephemeral filesystem, so offers written there would vanish on the next deploy. | done |
 
@@ -114,7 +114,7 @@ Planned split, subject to revision after Phase 3 lands:
 
 | Id | Task | Notes |
 | --- | --- | --- |
-| T5 | Offer versions (C-7, M-2), records `view` (C-6), edit, publish/pause, derived expiry (D-14, D-15), F-6, F-7 | **ready** — `docs/prompts/T5-versions-publish.md`. Split on 2026-09-29: marketplace and buyer page moved to T9. |
+| T5 | Offer versions (C-7, M-2), records `view` (C-6), edit, publish/pause, derived expiry (D-14, D-15), F-6, F-7 | **dispatched 2026-09-29** — `docs/prompts/T5-versions-publish.md`. Split on 2026-09-29: marketplace and buyer page moved to T9. |
 | T9 | Marketplace search and filters, buyer offer page (published, non-expired, current version via `buyerView`), and the buyer-view formatting fixes from the A-3 screenshot (§7), plus F-8 (rate chooser search and filters, §7 O-9) | Blocked on T5. New id; ids are never renumbered. |
 | T6 | Requests, accept/decline/counter, availability accounting. F-3 decided as D-13 (buyer-terms hash). Blocked on T9. | The concurrency task. D-3's synchronous-mutation rule is the core invariant; test with overlapping requests. |
 | T7 | Post-acceptance carrier statuses, cancellation, dispute state | Mutual-cancel or unresolved dispute only (PRD Phase 4). |
@@ -375,7 +375,7 @@ Follow-ups opened:
 
 ## 7. Operator reports
 
-### A-3 (Phase 3 acceptance), partial, 2026-09-29
+### A-3 (Phase 3 acceptance), partial, 2026-09-29 (updated same day)
 
 The operator sent a screenshot of the buyer panel of an offer on oceanrelay.ai:
 "Bob's containers, operated by CMA", Penang → Savannah, 40D, 100 containers, sailing
@@ -384,6 +384,14 @@ carrier endorsement." and "Quantity is the seller's claim. OceanRelay has not co
 the space." Both required statements are present. **Not yet reported:** whether this
 offer was rate-based or manual, the manual offer from a no-rates account (O-4(b)), and
 O-1 and O-2. A-3 stays open until those are confirmed.
+
+Update, 2026-09-29, from the operator:
+- The screenshot offer was **rate-based**: done.
+- **O-1 disconnect: done** on the deployed service.
+- **Manual offer from a no-rates account: not yet.** The operator will do it later.
+- **O-2 revoke (revoke in Rate Ninja, wait 10+ minutes, reload): not reported.** Still open.
+
+A-3 remaining: the manual offer and O-2.
 
 Buyer-view issues seen in the screenshot. Cosmetic; they do not fail A-3. Assigned to T9:
 - The price shows minor units to the buyer ("12046.00 USD (1204600 minor units)"). Show
@@ -399,7 +407,10 @@ Buyer-view issues seen in the screenshot. Cosmetic; they do not fail A-3. Assign
   is: everyone signs in through Rate Ninja as a contract owner. Planner recommendation: an
   env var `OCEANRELAY_OPERATOR_SUBS` listing the Rate Ninja user ids (`sub`) allowed into
   operator screens. It is checked server-side on every operator route and shown on
-  `/config` as a count, never the ids. Awaiting operator confirmation; not needed until T8.
+  `/config` as a count, never the ids. Awaiting operator confirmation; not needed until T8. Operator asked what "set in Render" means (2026-09-29); explained as the same
+  Environment tab used for `OCEANRELAY_RECORDS_PATH` (O-6). Open point: OceanRelay does not
+  currently show a user their Rate Ninja `sub`, so the operator cannot look it up. T8 should
+  show "Your Rate Ninja user id" on the connected home page so the value can be copied.
 - **O-9, "make it easier to add the rates": answered (b), 2026-09-29.** The request is about
   picking a rate inside OceanRelay, not entering rates in Rate Ninja. Assigned to T9 as
   **F-8**: the `/offers/new` rate chooser gets search and filters (origin, destination,
