@@ -145,6 +145,30 @@ immutable, which T6 relies on ("an edit is a new version"). An edit keeps the ve
 Rate Ninja snapshot and `baseMinor` (D-11). Repricing from a changed rate means creating
 a new offer; T5 adds no refresh-from-Rate-Ninja action.
 
+### D-16 — Operators are named by an environment variable for the pilot (2026-09-29, operator decision on O-8)
+
+`OCEANRELAY_OPERATOR_SUBS` is a comma-separated list of Rate Ninja user ids (`sub`). A
+signed-in user whose `sub` is on the list may use operator screens. Everyone else gets
+the same 404 as an unknown page. Rules:
+- The list is read from the environment at startup.
+- It is checked server-side on every operator route.
+- It is never editable from inside OceanRelay.
+- `/config` shows only a count of configured operators, never the ids.
+
+Adding or removing an operator means editing the setting in Render, which restarts the
+service.
+
+Why: no in-app path can grant operator rights, and there is no bootstrap problem. It is
+enough for the handful of operators in an invite-only pilot. It keeps no history of who
+was an operator when, beyond Render's own event log.
+
+Revisit if operators change often or number more than a few. The next step would be
+records-backed roles with a grant screen and audit entries, keeping this variable only
+to name the first admin.
+
+T8 must show the signed-in user their Rate Ninja `sub` on the home page, so the value
+can be copied into the setting.
+
 ## Interface contracts
 
 A contract is the surface other tasks build on. The task named as owner publishes it; later
