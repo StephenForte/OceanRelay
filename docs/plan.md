@@ -114,8 +114,8 @@ Planned split, subject to revision after Phase 3 lands:
 
 | Id | Task | Notes |
 | --- | --- | --- |
-| T5 | Offer versions (C-7, M-2), records `view` (C-6), edit, publish/pause, derived expiry (D-14, D-15), F-6, F-7 | **dispatched 2026-09-29** — `docs/prompts/T5-versions-publish.md`. Split on 2026-09-29: marketplace and buyer page moved to T9. |
-| T9 | Marketplace search and filters, buyer offer page (published, non-expired, current version via `buyerView`), and the buyer-view formatting fixes from the A-3 screenshot (§7), plus F-8 (rate chooser search and filters, §7 O-9) | Blocked on T5. New id; ids are never renumbered. |
+| T5 | Offer versions (C-7, M-2), records `view` (C-6), edit, publish/pause, derived expiry (D-14, D-15), F-6, F-7 | **approved 2026-09-29, PR #18 at `df275bf`** (review in §6) — `docs/prompts/T5-versions-publish.md`. Split on 2026-09-29: marketplace and buyer page moved to T9. |
+| T9 | Marketplace search and filters, F-9 and F-10 from the T5 review, buyer offer page (published, non-expired, current version via `buyerView`), and the buyer-view formatting fixes from the A-3 screenshot (§7), plus F-8 (rate chooser search and filters, §7 O-9) | Blocked on T5. New id; ids are never renumbered. |
 | T6 | Requests, accept/decline/counter, availability accounting. F-3 decided as D-13 (buyer-terms hash). Blocked on T9. | The concurrency task. D-3's synchronous-mutation rule is the core invariant; test with overlapping requests. |
 | T7 | Post-acceptance carrier statuses, cancellation, dispute state | Mutual-cancel or unresolved dispute only (PRD Phase 4). |
 | T8 | Audit log and operator review screen | Operator identity decided as D-16 (`OCEANRELAY_OPERATOR_SUBS`). T8 also shows users their Rate Ninja `sub`. |
@@ -370,6 +370,57 @@ Follow-ups opened:
   99 pass / 1 fail ("chooser rendered raw markup"). Restored, it is 100/0.
 - The worker put its response in the PR description, not a comment. It matches the
   branch.
+
+### T5 — PR #18, `df275bf`, approved 2026-09-29
+
+Verified by the planner:
+
+- Base `a46fb53` = `origin/main`. Diff touches only owned files. No shared or off-limits
+  file was changed.
+- Gate re-run in a clean worktree: `node --check` on all changed files; `npm test`
+  116/0/0 (100 + 16, matches the handoff).
+- Existing tests: 33 assertion lines were removed, but assertion counts rose (records
+  34 → 35, offers 186 → 201). Every removed value is still asserted the same number of
+  times (for example `baseMinor, 150000` 5→5, `snapshot-note-private` 6→6,
+  `statusHistory.length, 1` 2→2). These are moves to the C-7 shape, not deletions.
+  Judged not a weakening.
+- **M-2 on a real v1 file**, not a fixture: `main`'s own screens at `a46fb53` produced a
+  v1 file containing a rate-based offer (40D, 10951 USD +10%, moved to `carrier_pending`)
+  and a manual offer (with a cutoff date). T5's `openRecords` migrated it:
+  - schemaVersion 2, with 0 field mismatches across every C-7 location for both offers;
+  - `.pre-m2.bak` byte-identical to the original, mode 0600;
+  - a second open changes neither the file (bytes and mtime) nor the `.bak`.
+- T5's app over that migrated file:
+  - `GET /offers` and the preview leave the file untouched (C-6).
+  - After publish, one edit and two capacity changes, the offer has versions 1 to 4, all
+    frozen, and version 1 is byte-identical.
+  - An edit posting `source=manual`, `equipment=20D`, `baseMinor`, `baseAmount`,
+    `snapshot` and `companyId` keeps `rn_rate`, 40D, base 1095100, `rate-1` and the
+    snapshot.
+  - Another company's publish, edit and edit-GET are 404 with the file unchanged. A bad
+    CSRF token gets a 403.
+  - draft → paused is refused.
+- Proven able to fail: with `editOffer`'s price lock removed, the suite fails
+  (115/1). The end-to-end probe still held because the edit route supplies the stored
+  price too, so there are two independent locks.
+- Planner error, recorded for honesty: the first probe run picked the manual offer by
+  mistake (after M-2, `source` lives on the version, not the offer). It briefly looked
+  like a price-lock bypass. Re-run against the rate-based offer: no defect.
+
+Follow-ups opened (both assigned to T9, which touches the same routes):
+
+- **F-9:** a draft whose deadline has already passed can still be published, and then
+  reads as expired at once. The worker disclosed this. Refuse publish when the current
+  version's deadline is before today.
+- **F-10:** a capacity-status change is allowed on an expired offer and appends versions
+  to it. The preview still shows the buttons. The worker disclosed this. Refuse it and
+  hide the buttons.
+
+Accepted as reasonable readings of D-15, no change needed:
+- a manual offer's price stays editable (D-11 locks only the Rate Ninja price);
+- pause is refused on an expired offer;
+- versions appended while paused stay unfrozen until resume, and nothing earlier is
+  rewritten.
 
 ---
 
