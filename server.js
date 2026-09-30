@@ -11,8 +11,9 @@ const systemRoutes = require("./lib/routes/system");
 const connectRoutes = require("./lib/routes/connect");
 const offerRoutes = require("./lib/routes/offers");
 const marketRoutes = require("./lib/routes/market");
+const requestRoutes = require("./lib/routes/requests");
 
-const areas = [systemRoutes, connectRoutes, offerRoutes, marketRoutes];
+const areas = [systemRoutes, connectRoutes, offerRoutes, marketRoutes, requestRoutes];
 
 const accessTokens = new Map();
 const refreshInflight = new Map();

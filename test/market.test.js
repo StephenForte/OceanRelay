@@ -683,4 +683,47 @@ describe("marketplace", () => {
       assert.equal(injected.html.includes("saved-banner"), false);
     });
   });
+
+  it("counts only visible fields when a manual base price is zero", async () => {
+    await withApp(async ({ base, origin, recordsPath }) => {
+      const { cookie } = await connectOwner({ base, origin });
+      const form = await pageOf(base, cookie, "/offers/new?source=manual");
+      const zero = await postForm(base, cookie, "/offers", {
+        csrf_token: form.csrf,
+        source: "manual",
+        equipment: "40HC",
+        baseAmount: "0",
+        ...sellerFields(),
+      });
+      assert.equal(zero.status, 200);
+      const html = await zero.text();
+      assert.match(html, /Not saved\. Fix the 1 field marked below\./);
+      assert.equal(html.includes('href="#baseMinor"'), false);
+      assert.match(html, /href="#baseAmount"/);
+      assert.equal(Object.keys(JSON.parse(fs.readFileSync(recordsPath, "utf8")).offers).length, 0);
+
+      const blank = await postForm(base, cookie, "/offers", {
+        csrf_token: form.csrf,
+        source: "manual",
+        equipment: "40HC",
+        baseAmount: "",
+        ...sellerFields(),
+      });
+      const blankHtml = await blank.text();
+      assert.match(blankHtml, /Not saved\. Fix the 1 field marked below\./);
+      assert.equal(blankHtml.includes('href="#baseMinor"'), false);
+
+      const quantity = await postForm(base, cookie, "/offers", {
+        csrf_token: form.csrf,
+        source: "manual",
+        equipment: "40HC",
+        baseAmount: "20",
+        ...sellerFields({ quantity: "" }),
+      });
+      const quantityHtml = await quantity.text();
+      assert.match(quantityHtml, /Not saved\. Fix the 1 field marked below\./);
+      assert.match(quantityHtml, /href="#quantity"/);
+      assert.equal(quantityHtml.includes('href="#baseMinor"'), false);
+    });
+  });
 });
