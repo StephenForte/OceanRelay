@@ -115,8 +115,8 @@ Planned split, subject to revision after Phase 3 lands:
 | Id | Task | Notes |
 | --- | --- | --- |
 | T5 | Offer versions (C-7, M-2), records `view` (C-6), edit, publish/pause, derived expiry (D-14, D-15), F-6, F-7 | **approved 2026-09-29, PR #18 at `df275bf`** (review in §6) — `docs/prompts/T5-versions-publish.md`. Split on 2026-09-29: marketplace and buyer page moved to T9. |
-| T9 | **ready** — `docs/prompts/T9-marketplace.md`. Marketplace search and filters (D-17, C-8), F-9 and F-10 from the T5 review, operator-reported usability fixes (§7, 2026-09-29), buyer offer page (published, non-expired, current version via `buyerView`), and the buyer-view formatting fixes from the A-3 screenshot (§7), plus F-8 (rate chooser search and filters, §7 O-9) | Blocked on T5. New id; ids are never renumbered. |
-| T6 | Requests, accept/decline/counter, availability accounting. F-3 decided as D-13 (buyer-terms hash). Blocked on T9. | The concurrency task. D-3's synchronous-mutation rule is the core invariant; test with overlapping requests. |
+| T9 | **approved 2026-09-30, PR #21 at `8aaa060`** (review in §6). Prompt: `docs/prompts/T9-marketplace.md`. Marketplace search and filters (D-17, C-8), F-9 and F-10 from the T5 review, operator-reported usability fixes (§7, 2026-09-29), buyer offer page (published, non-expired, current version via `buyerView`), and the buyer-view formatting fixes from the A-3 screenshot (§7), plus F-8 (rate chooser search and filters, §7 O-9) | Blocked on T5. New id; ids are never renumbered. |
+| T6 | Requests, accept/decline/counter, availability accounting. F-3 decided as D-13 (buyer-terms hash). Unblocked once PR #21 merges. | The concurrency task. D-3's synchronous-mutation rule is the core invariant; test with overlapping requests. |
 | T7 | Post-acceptance carrier statuses, cancellation, dispute state | Mutual-cancel or unresolved dispute only (PRD Phase 4). |
 | T8 | Audit log and operator review screen | Operator identity decided as D-16 (`OCEANRELAY_OPERATOR_SUBS`). T8 also shows users their Rate Ninja `sub`. |
 | A-4 | Phase 4 acceptance with accounts O-4(a) and O-4(c) | |
@@ -421,6 +421,55 @@ Accepted as reasonable readings of D-15, no change needed:
 - pause is refused on an expired offer;
 - versions appended while paused stay unfrozen until resume, and nothing earlier is
   rewritten.
+
+### T9 — PR #21, `8aaa060`, approved 2026-09-30
+
+Verified by the planner:
+
+- Base `48b64c4` = `origin/main`. No off-limits file changed. Shared files match the
+  handoff: one `areas` entry in `server.js`, and the Marketplace link in `lib/page.js`.
+- Gate re-run in a clean worktree: `node --check` on all changed files; `npm test`
+  125/0/0 (116 + 9).
+- Existing tests: each change follows the spec. The create redirect now carries
+  `?result=saved_draft`. The buyer panel asserts `1,650.00 USD` and rejects "minor
+  units". List lines use labels. The past-deadline draft publish that used to succeed now
+  expects `deadline_passed` (F-9). Judged strengthening, not weakening.
+- `listPublishedOffers` requires `state === "published"`, not derived-expired, and
+  `frozen === true`, and builds `view` only from `buyerView`.
+- Probes (standalone script, mock Rate Ninja, second company seeded as a connection;
+  deleted afterwards):
+  - **Leak:** a rate-based offer with a 7,777 USD buy price, a 13.57% markup, notes
+    `NOTESCANARY` and source id `rateSECRETID77`, viewed by another company. Neither
+    `/market` nor `/market/:id` contains the base, the markup, the notes, the source id,
+    the seller's `sub` or `companyId`, or "minor units". The buyer price `8,832.34 USD`
+    is shown. The "Your offer" badge appears for the seller only.
+  - **Unfrozen while paused:** after pause and an edit (current v2 unfrozen), the offer
+    is absent from `/market`, its detail returns 404, and the edited text appears
+    nowhere. After resume (v2 frozen), the detail shows v2.
+  - **404s:** paused and unknown ids give byte-identical 404s.
+  - **Signed out:** `/market`, `/market/<real id>` and `/market/<unknown>` all return 302
+    to `/`, with identical responses (no existence leak).
+  - **Banner:** `saved_draft` only shows for a real unpublished v1. `saved_version`
+    takes its number from the record, and a query-string `n=<b>9</b>` is ignored. No
+    `<script>` is echoed.
+  - **Filters:** carrier `cma` (the operating carrier) matches and `xyz` (the code-share
+    name) does not. Max price is inclusive and same-currency only (EUR excludes a USD
+    offer). A max price with no currency does not filter and shows an error.
+  - **Error summary:** a create with no currency re-renders with "Not saved" above the
+    form, and nothing is persisted.
+- **Probe proven able to fail:** with the buyer projection made to carry `baseMinor`,
+  the probe reports the leak on both pages and the suite fails (123/2). Reverted.
+- Planner errors during this review, recorded for honesty: two probe checks were wrong
+  at first. A text match on "Your offer" also matched the nav link "Your offers", and my
+  expected price was miscalculated. Both were corrected and re-run; the code was right
+  both times. The C-8 contract text was wrong and has been amended (see
+  `docs/decisions.md`).
+
+Better than asked: the banner is validated against the offer's actual state, not only
+mapped from a fixed table.
+
+No follow-ups opened. The worker's notes on seller-company visibility (T6) and market
+pagination (not needed at pilot volume) stand as already planned.
 
 ---
 

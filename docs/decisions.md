@@ -309,3 +309,12 @@ Before the first write, M-2 copies the v1 file byte-for-byte to `<path>.pre-m2.b
   `currency` (compared in minor units, same currency only), and `capacityStatus`.
 - Unknown query keys are ignored.
 - `companyId` is used only to mark "your offer". It is never rendered.
+
+*Amended 2026-09-30 (planner error, caught by the T9 worker):* the entry text above said
+`view` is `buyerView(currentVersion)`. A C-7 version nests its commercial fields under
+`terms`, and `buyerView` reads them from the top level, so that call would produce an
+empty market. As built and reviewed, `view` is
+`buyerView({ ...currentVersion.terms, capacityStatus: currentVersion.capacityStatus })`.
+The `carrier` filter matches the operating carrier in the buyer view's code-share line:
+a filter for the operating carrier matched, and a filter for the code-share name did not.
+C-4's buyer view has no separate carrier field.
