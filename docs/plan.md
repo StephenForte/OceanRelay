@@ -116,7 +116,7 @@ Planned split, subject to revision after Phase 3 lands:
 | --- | --- | --- |
 | T5 | Offer versions (C-7, M-2), records `view` (C-6), edit, publish/pause, derived expiry (D-14, D-15), F-6, F-7 | **approved 2026-09-29, PR #18 at `df275bf`** (review in §6) — `docs/prompts/T5-versions-publish.md`. Split on 2026-09-29: marketplace and buyer page moved to T9. |
 | T9 | **merged `e0f3590` 2026-09-30, PR #21 at `8aaa060`** (review in §6). Prompt: `docs/prompts/T9-marketplace.md`. Marketplace search and filters (D-17, C-8), F-9 and F-10 from the T5 review, operator-reported usability fixes (§7, 2026-09-29), buyer offer page (published, non-expired, current version via `buyerView`), and the buyer-view formatting fixes from the A-3 screenshot (§7), plus F-8 (rate chooser search and filters, §7 O-9) | Blocked on T5. New id; ids are never renumbered. |
-| T6 | Requests, accept/decline/counter, availability accounting (D-18, D-19, C-9, C-10, M-3) | **dispatched 2026-09-30** — `docs/prompts/T6-requests.md`. D-19 confirmed by the operator. | The concurrency task. D-3's synchronous-mutation rule is the core invariant; test with overlapping requests. |
+| T6 | Requests, accept/decline/counter, availability accounting (D-18, D-19, C-9, C-10, M-3) | **in review — PR #26 at `96c05d0`, complete-with-caveats, 135 tests** — `docs/prompts/T6-requests.md`. D-19 confirmed by the operator. | The concurrency task. D-3's synchronous-mutation rule is the core invariant; test with overlapping requests. |
 | T7 | Post-acceptance carrier statuses, cancellation, dispute state | Mutual-cancel or unresolved dispute only (PRD Phase 4). |
 | T8 | Audit log and operator review screen | Operator identity decided as D-16 (`OCEANRELAY_OPERATOR_SUBS`). T8 also shows users their Rate Ninja `sub`. |
 | A-4 | Phase 4 acceptance with accounts O-4(a) and O-4(c) | |
@@ -645,3 +645,91 @@ label fix goes to T9 alongside the buyer-panel fixes.
   6. the buyer page shows no buy price, markup or minor units.
 
   **Phase 3 is accepted.** T6 was dispatched the same day.
+
+---
+
+## 8. Planner working notes (for the next session)
+
+This section holds what previously lived only in the planning conversation. It is the
+"read this before acting" list for whoever picks up the planner role.
+
+### How reviews are done here (and what has bitten us)
+
+- **Run your own probes against the running app.** Use a standalone script under the
+  scratchpad: the mock Rate Ninja, a temp records file, and a second company seeded with
+  `store.saveConnection(...)` plus a signed session cookie. Prove each key probe can fail
+  by breaking the mechanism, then restoring it.
+- **Migrations:** generate the old-format file with the previous `main`'s own screens
+  (driven over HTTP), not a hand fixture. Then open it with the new code and diff every
+  field. This caught nothing wrong so far, but it is the check that counts.
+- **After M-2, `source` lives on each version, not on the offer.** A probe that reads
+  `offer.source` silently picks the wrong offer (the T5 review nearly raised a false
+  alarm this way).
+- **Text probes collide with navigation.** The text "Your offer" also matches the nav
+  link "Your offers"; match on markup (for example `class="yours"`) instead.
+- **Check bot comments on every PR before calling it done.** Cursor Bugbot runs on each
+  PR. It was a false positive on #10 (it claimed URL path decoding) and a real bug on #21
+  (F-11). Verify against the reviewed SHA, and record which of the two it was.
+- **Workers put their round-two responses in the PR description** as often as in
+  comments. Read both, and verify against the branch, not the text. On #10 a worker
+  cited an unpushed SHA.
+- **Commands for the operator must be tested first,** or clearly labelled untested.
+  - Render's Shell runs `sh`, not `bash`, so `read -s` fails there; use
+    `bash -c 'read -rsp …'`.
+  - SQLite needs single-quoted literals; prefer bound parameters.
+  - Running Rate Ninja's own code (its server or scripts) is not permitted in the
+    planner session. Test SQL against a scratch SQLite database built from the column
+    list instead.
+
+### Environment facts
+
+- **Deployed service:** OceanRelay runs on Render (oceanrelay.ai).
+  - Records file: `OCEANRELAY_RECORDS_PATH=/var/data/oceanrelay-records.json`.
+  - Backups written by migrations sit beside it (`.pre-m2.bak`, and after T6
+    `.pre-m3.bak`).
+- **Rate Ninja** is a separate repo (`StephenForte/rateninja`), readable by git clone. It
+  stores its data in SQLite (`node:sqlite`, `SQLITE_DB_PATH`), and its admin API cannot
+  create companies.
+- **Test accounts:**
+  - **Kings (operator, has rates):** `companyId` as returned by Rate Ninja; its
+    `rate_view` is `'1.0'`, a shared label.
+  - **Test Buyer Co (`co-test-buyer` / user `testbuyer`, no rates):** created by SQL on
+    2026-09-30.
+- **The operator runs workers in Cursor.** Some run locally on the operator's Mac, and
+  a local checkout can sit on an old `task/…` branch. Workers must start from `main`.
+  The operator stashed an unreviewed local F-11 fix (`git stash list`); drop it once T6
+  merges.
+- **Planning branch** `sf/gallant-newton-t4rszt` is deleted by GitHub on every merge and
+  re-created on the next push. **Open its PR in the same step as the push**; the operator
+  noticed it as a "stray branch" when a push had no PR.
+
+### Open work after T6
+
+- **T7:** post-acceptance statuses (carrier-pending, confirmed, rejected, rolled,
+  completed, cancelled, each with actor and time), mutual cancellation, and the
+  unresolved-dispute state. No money moves (PRD Phase 4).
+- **T8:** audit log (PRD G2) and the operator review screen. Uses
+  `OCEANRELAY_OPERATOR_SUBS` (D-16), and shows users their Rate Ninja `sub` on the home
+  page.
+- **A-4, Phase 4 acceptance, by the operator on the deployed service:**
+  1. Kings publishes an offer.
+  2. `testbuyer` requests part of it.
+  3. Kings counters.
+  4. `testbuyer` accepts.
+  5. Company names are revealed to both sides (D-19).
+  6. The available quantity drops.
+  7. Nothing reads as a carrier booking.
+- **Phase 5 is not planned.** It needs from the operator: the ForteL2 Sepolia RPC
+  endpoint and access, the chain owner's contract-deployment process, and approval for a
+  wallet-signature dependency (D-9 requires a decision).
+- **Candidate Rate Ninja task, outside this PRD:** an admin screen to create a company
+  and user, replacing the SQL route.
+
+### Operator preferences
+
+- Wants paste-ready prompts in one fenced block. Ends worker prompts with a `/goal …`
+  line, which is not in the `dispatch-worker` skill.
+- Anti-sycophantic: push back with evidence and do not fold.
+- Explain Render, SQL and git steps concretely, with exactly where to run them and what
+  success looks like. Never give conflicting instructions: if you pause to check
+  something, finish the check before saying "run it".
