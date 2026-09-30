@@ -4,7 +4,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { createServer } = require("../server");
-const { COOKIE_NAME, signSession } = require("../lib/session");
+const { COOKIE_NAME, signSession, readSession } = require("../lib/session");
 const { loadConfig } = require("../lib/config");
 const { openStore } = require("../lib/store");
 const { openRecords } = require("../lib/records");
@@ -23,8 +23,8 @@ const THIRD = { companyId: "third-co", sub: "user-third", companyName: "Third Co
 const MARKUP = "<img src=x onerror=alert(1)>";
 
 const REQUEST_KEYS = [
-  "acceptance", "buyerCompanyId", "buyerSub", "counters", "createdAt", "history",
-  "id", "offerId", "quantity", "sellerCompanyId", "state", "version",
+  "acceptance", "buyerCompanyId", "buyerCompanyName", "buyerSub", "counters", "createdAt", "history",
+  "id", "offerId", "quantity", "sellerCompanyId", "sellerCompanyName", "state", "version",
 ];
 const ACCEPTANCE_KEYS = [
   "at", "buyerCompanyId", "buyerSub", "by", "counter", "currency", "offerId",
@@ -154,7 +154,7 @@ describe("buyer terms hash", () => {
       const canonical = buyerTermsCanonical(fields);
       assert.equal(acceptance.termsHash, buyerTermsHash(canonical));
       assert.equal(canonical.startsWith('{"v":1,'), true);
-      for (const secret of ["864201357", "97531", "NOTESCANARY-q7w", "rateSECRETID77", "CANARY-SUB-q7w", "CANARY-CO-q7w", "baseMinor", "markup"]) {
+      for (const secret of ["864201357", "97531", "NOTESCANARY-q7w", "rateSECRETID77", "CANARY-SUB-q7w", "CANARY-CO-q7w", "baseMinor", "markup", "Canary", "Other Co", "buyerCompanyName", "sellerCompanyName"]) {
         assert.equal(canonical.includes(secret), false, secret);
       }
       const reversed = {};
@@ -219,6 +219,8 @@ describe("request records", () => {
       assert.equal(pending.ok, true);
       assert.deepEqual(Object.keys(pending.request).sort(), REQUEST_KEYS);
       assert.equal(pending.request.acceptance, null);
+      assert.equal(pending.request.buyerCompanyName, BUYER.companyName);
+      assert.equal(pending.request.sellerCompanyName, null);
       assert.equal(pending.request.state, "pending");
       assert.deepEqual(Object.keys(pending.request.history[0]).sort(), HISTORY_KEYS);
 
@@ -237,6 +239,8 @@ describe("request records", () => {
       assert.equal(acceptance.buyerSub, BUYER.sub);
       assert.equal(acceptance.sellerCompanyId, SELLER.companyId);
       assert.equal(acceptance.buyerCompanyId, BUYER.companyId);
+      assert.equal(accepted.request.sellerCompanyName, SELLER.companyName);
+      assert.equal(accepted.request.buyerCompanyName, BUYER.companyName);
       assert.equal(acceptance.offerId, offer.id);
       assert.equal(acceptance.termsVersion, 1);
       assert.equal(acceptance.at, accepted.request.history.at(-1).at);
@@ -262,6 +266,8 @@ describe("request records", () => {
       assert.equal(countered.request.state, "countered");
       assert.deepEqual(Object.keys(countered.request.counters[0]).sort(), COUNTER_KEYS);
       assert.equal(countered.request.counters[0].n, 1);
+      assert.equal(countered.request.sellerCompanyName, SELLER.companyName);
+      assert.equal(countered.request.buyerCompanyName, BUYER.companyName);
       const buyerAccepted = records.acceptRequest(BUYER, toCounter.id, TODAY);
       assert.equal(buyerAccepted.ok, true);
       assert.equal(buyerAccepted.request.acceptance.quantity, 3);
@@ -306,6 +312,18 @@ describe("request records", () => {
       }, TODAY);
       assert.equal(records.withdrawRequest(BUYER, withdrawCounter.id).ok, true);
       assert.equal(records.getRequestFor(SELLER.companyId, withdrawCounter.id).state, "withdrawn");
+
+      const named = records.createRequest(BUYER, publish(records).id, 1, 1, TODAY).request;
+      records.transact((data) => {
+        data.requests[named.id].sellerCompanyName = "Kept Name";
+      });
+      const kept = records.counterRequest(SELLER, named.id, {
+        quantity: 1,
+        unitBuyerMinor: 100,
+        serviceTerms: "Stay",
+      }, TODAY);
+      assert.equal(kept.ok, true);
+      assert.equal(kept.request.sellerCompanyName, "Kept Name");
     });
   });
 
@@ -440,6 +458,17 @@ function seedCompany(store, sid, csrf, profile) {
     },
   });
   return { cookie: sessionCookie(sid, csrf), csrf };
+}
+
+function elementText(html, id) {
+  const match = html.match(new RegExp(`id="${id}">([^<]*)`));
+  return match ? match[1] : "";
+}
+
+function sidOf(cookie) {
+  const token = decodeURIComponent(cookie.slice(cookie.indexOf("=") + 1));
+  const session = readSession(token, SESSION_SECRET);
+  return session && session.sid;
 }
 
 async function pageOf(base, cookie, target) {
@@ -803,6 +832,102 @@ describe("request screens", () => {
       assert.equal(await draftPost.text(), unknown.html);
       assert.equal(fileText(recordsPath).includes("Draft Lane"), true);
       assert.equal(before.includes("requests"), true);
+    });
+  });
+
+  it("shows the quantity Accept commits and keeps snapshotted names after disconnect", async () => {
+    await withApp(async ({ base, origin, store, records, recordsPath }) => {
+      const seller = await connectOwner({ base, origin });
+      const buyerName = `Harbor${MARKUP}`;
+      const buyer = seedCompany(store, "sid-buyer", "csrf-buyer", { ...BUYER, companyName: buyerName });
+      const offer = publish(records, manualTerms({ quantity: 10, codeShareName: "Commit Lane" }));
+      const detail = await pageOf(base, buyer.cookie, `/market/${offer.id}`);
+      const requested = await postForm(base, buyer.cookie, `/market/${offer.id}/requests`, {
+        csrf_token: detail.csrf,
+        version: detail.html.match(/name="version" value="([^"]+)"/)[1],
+        quantity: "3",
+      });
+      assert.equal(requested.status, 302);
+      const requestPath = requested.headers.get("location");
+      const created = Object.values(diskRequests(recordsPath))[0];
+      assert.equal(created.quantity, 3);
+      assert.equal(created.buyerCompanyName, buyerName);
+      assert.equal(created.sellerCompanyName, null);
+
+      const buyerPending = await pageOf(base, buyer.cookie, requestPath);
+      const sellerPending = await pageOf(base, seller.cookie, requestPath);
+      for (const html of [buyerPending.html, sellerPending.html]) {
+        assert.equal(elementText(html, "requested-quantity"), "3");
+        assert.match(elementText(html, "listed-quantity"), /^10 /);
+        assert.equal(html.includes('id="accept-quantity"'), false);
+        assert.equal(html.includes("Harbor"), false);
+        assert.equal(html.includes("Kings"), false);
+        assert.equal(html.includes(MARKUP), false);
+      }
+      const buyerList = await pageOf(base, buyer.cookie, "/requests");
+      const sellerList = await pageOf(base, seller.cookie, "/requests");
+      const preview = await pageOf(base, seller.cookie, `/offers/${offer.id}`);
+      for (const html of [buyerList.html, sellerList.html, preview.html]) {
+        assert.equal(html.includes("Harbor"), false);
+        assert.equal(html.includes("Kings"), false);
+        assert.equal(html.includes(MARKUP), false);
+      }
+
+      const countered = await postForm(base, seller.cookie, `${requestPath}/counter`, {
+        csrf_token: sellerPending.csrf,
+        quantity: "4",
+        unitPrice: "25.00",
+        serviceTerms: "Counter terms",
+      });
+      assert.equal(countered.status, 302);
+      const storedCounter = Object.values(diskRequests(recordsPath))[0];
+      assert.equal(storedCounter.sellerCompanyName, "Kings");
+      assert.equal(storedCounter.buyerCompanyName, buyerName);
+      for (const cookie of [buyer.cookie, seller.cookie]) {
+        const page = await pageOf(base, cookie, requestPath);
+        assert.equal(elementText(page.html, "requested-quantity"), "3");
+        assert.equal(elementText(page.html, "accept-quantity"), "4");
+        assert.equal(elementText(page.html, "accept-unit-price").includes("25.00"), true);
+        assert.equal(elementText(page.html, "accept-total").includes("100.00"), true);
+        assert.match(page.html, /Accept commits these terms/);
+        assert.equal(page.html.includes("Harbor"), false);
+        assert.equal(page.html.includes("Kings"), false);
+        assert.equal(page.html.includes(MARKUP), false);
+      }
+      const counteredList = await pageOf(base, seller.cookie, "/requests");
+      const counteredPreview = await pageOf(base, seller.cookie, `/offers/${offer.id}`);
+      const counteredBuyerList = await pageOf(base, buyer.cookie, "/requests");
+      for (const html of [counteredList.html, counteredPreview.html, counteredBuyerList.html]) {
+        assert.equal(html.includes("Harbor"), false);
+        assert.equal(html.includes("Kings"), false);
+      }
+
+      const buyerCounter = await pageOf(base, buyer.cookie, requestPath);
+      const accepted = await postForm(base, buyer.cookie, `${requestPath}/accept`, {
+        csrf_token: buyerCounter.csrf,
+      });
+      assert.equal(accepted.status, 302);
+      const escaped = "Harbor&lt;img src=x onerror=alert(1)&gt;";
+      const buyerDone = await pageOf(base, buyer.cookie, requestPath);
+      const sellerDone = await pageOf(base, seller.cookie, requestPath);
+      for (const html of [buyerDone.html, sellerDone.html]) {
+        assert.equal(html.includes(MARKUP), false);
+        assert.equal(html.includes(escaped), true);
+        assert.match(html, /id="seller-name">Kings/);
+      }
+
+      store.deleteConnection("sid-buyer");
+      const sellerAfter = await pageOf(base, seller.cookie, requestPath);
+      assert.equal(sellerAfter.response.status, 200);
+      assert.equal(sellerAfter.html.includes(escaped), true);
+      assert.match(sellerAfter.html, /id="seller-name">Kings/);
+
+      seedCompany(store, "sid-buyer", "csrf-buyer", { ...BUYER, companyName: buyerName });
+      store.deleteConnection(sidOf(seller.cookie));
+      const buyerAfter = await pageOf(base, buyer.cookie, requestPath);
+      assert.equal(buyerAfter.response.status, 200);
+      assert.equal(buyerAfter.html.includes(escaped), true);
+      assert.match(buyerAfter.html, /id="seller-name">Kings/);
     });
   });
 });
