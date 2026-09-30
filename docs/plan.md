@@ -608,3 +608,14 @@ label fix goes to T9 alongside the buyer-panel fixes.
     - the insert creates the company and user;
     - a re-run fails with `UNIQUE constraint failed` and leaves no partial write.
   - Still not tested: Rate Ninja's own sign-in path reading the new rows.
+- **Rate Ninja test account created, 2026-09-30.** Company `co-test-buyer` ("Test Buyer
+  Co", Contract Owner, `rate_view` = its own id, so no rate can match it) and user
+  `testbuyer`. The operator has signed in to rateninja.co as `testbuyer`.
+  - Two planner errors on the way, both caught by the operator's runs:
+    - double-quoted SQL literals (fixed with bound parameters);
+    - `read -rs` in the password step, which likely fails under Render's `sh`, leaving an
+      empty password. Fixed with `bash -c 'read -rsp …'`.
+  - Checked before the insert: Kings' `rate_view` is `'1.0'`, a shared rate-visibility
+    label, so copying it would have shown and linked Kings' rates to the test company.
+  - **Next:** connect OceanRelay as `testbuyer`, confirm the "no rates" path (the
+    deferred A-3 check), and use the account as the Phase 4 buyer (A-4).
