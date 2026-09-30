@@ -380,6 +380,7 @@ throw on a version above 3.
 requests[id] = {
   id, offerId, version, createdAt,
   sellerCompanyId, buyerCompanyId, buyerSub,
+  buyerCompanyName, sellerCompanyName,        // amended 2026-09-30, see below
   quantity,
   state: "pending" | "countered" | "accepted" | "declined" | "withdrawn",
   counters: [{ n, quantity, unitBuyerMinor, serviceTerms, at, by }],
@@ -395,6 +396,15 @@ requests[id] = {
 
 `sellerSub` in the acceptance is the seller-side user who accepted, or, for an accepted
 counter, the user who made the counter.
+
+**Amended 2026-09-30, before merge (F-12, T6 review).** Company names are snapshotted
+onto the request from the acting identity, so D-19 does not depend on live connection
+rows, which are deleted on disconnect or revocation:
+- `buyerCompanyName` is set at creation.
+- `sellerCompanyName` is `null` until the seller's first counter or seller acceptance,
+  and is set then.
+- Both are rendered only once the request is `accepted`.
+- Neither enters the C-10 hash.
 
 ### C-10 — Buyer-terms canonical form and hash (owner: T6; implements D-13)
 
