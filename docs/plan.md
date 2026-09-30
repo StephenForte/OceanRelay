@@ -116,7 +116,7 @@ Planned split, subject to revision after Phase 3 lands:
 | --- | --- | --- |
 | T5 | Offer versions (C-7, M-2), records `view` (C-6), edit, publish/pause, derived expiry (D-14, D-15), F-6, F-7 | **approved 2026-09-29, PR #18 at `df275bf`** (review in §6) — `docs/prompts/T5-versions-publish.md`. Split on 2026-09-29: marketplace and buyer page moved to T9. |
 | T9 | **merged `e0f3590` 2026-09-30, PR #21 at `8aaa060`** (review in §6). Prompt: `docs/prompts/T9-marketplace.md`. Marketplace search and filters (D-17, C-8), F-9 and F-10 from the T5 review, operator-reported usability fixes (§7, 2026-09-29), buyer offer page (published, non-expired, current version via `buyerView`), and the buyer-view formatting fixes from the A-3 screenshot (§7), plus F-8 (rate chooser search and filters, §7 O-9) | Blocked on T5. New id; ids are never renumbered. |
-| T6 | Requests, accept/decline/counter, availability accounting (D-18, D-19, C-9, C-10, M-3) | **in review — PR #26 at `96c05d0`, complete-with-caveats, 135 tests** — `docs/prompts/T6-requests.md`. D-19 confirmed by the operator. | The concurrency task. D-3's synchronous-mutation rule is the core invariant; test with overlapping requests. |
+| T6 | Requests, accept/decline/counter, availability accounting (D-18, D-19, C-9, C-10, M-3) | **round 2 dispatched 2026-09-30** — PR #26: first round `96c05d0` changes requested (Bugbot quantity finding, plus F-12; review in §6) — `docs/prompts/T6-requests.md`. D-19 confirmed by the operator. | The concurrency task. D-3's synchronous-mutation rule is the core invariant; test with overlapping requests. |
 | T7 | Post-acceptance carrier statuses, cancellation, dispute state | Mutual-cancel or unresolved dispute only (PRD Phase 4). |
 | T8 | Audit log and operator review screen | Operator identity decided as D-16 (`OCEANRELAY_OPERATOR_SUBS`). T8 also shows users their Rate Ninja `sub`. |
 | A-4 | Phase 4 acceptance with accounts O-4(a) and O-4(c) | |
@@ -487,6 +487,72 @@ correctly. The planner's T9 probe covered only a missing currency.
   never pushed or reviewed. The operator stashed it to clean the checkout; the fix lands
   through T6 instead.
 
+### T6 — PR #26, first round `96c05d0` changes requested 2026-09-30
+
+Verified by the planner, not taken from the handoff:
+
+- **Base:** `39ba8fd`. `main` has since moved to `67f2e99`, but only through #27, which changed `docs/plan.md` only. No conflict (GitHub reports `CLEAN`).
+- **Scope:** 15 files, all owned or shared-additive. `server.js` has one `areas` entry. `lib/page.js` has one link. `lib/store.js`, `lib/offer-domain.js`, `lib/rate-ninja.js` and `docs/` are untouched.
+- **Gate re-run** in a scratch clone (Node 26.9): `npm test` 135 pass, 0 fail, 0 skip. This matches the handoff.
+- **Probes** (standalone scripts over HTTP, against the mock, temp files deleted):
+  - **Concurrency:** quantity 10, two buyers each request 6, and the seller fires both accepts together with `Promise.all`. Over 5 rounds, each gave statuses `[302, 400]`, 6 accepted on disk, and "no longer available" on the refusal.
+    - The same held for 5 rounds of the counter path (the seller accepts A while the buyer accepts B's counter for 6).
+    - A sequential counter for 6, after 6 had been accepted, is refused and leaves the file byte-identical.
+  - **Concurrency, probe shown to fail:**
+    - **M1:** the check removed from `acceptRequest` and moved into the route, with an `await` before the write. Rounds 1 to 4 accept both requests.
+    - **M2:** no check at all. Every round accepts both.
+    - **Weak spot in the worker's test:** under M1, the worker's own HTTP test ("accepts only one of two concurrent requests") still passed 5 times out of 5. Only the records-level test ("a second acceptance that no longer fits") went red. So the suite does guard the invariant, but through the records test. The HTTP test alone would not catch a route-level pre-check. This is not blocking, because the code is correct and the regression is caught.
+  - **M-3 on a real v2 file:** the file was made by `main`'s own screens over HTTP (a published offer with an edited v2, a paused rate-based offer, a draft, and UTF-8 text) and then opened with T6.
+    - `.pre-m3.bak` is byte-identical to the original, mode 0600.
+    - Each offer's JSON is byte-identical. The top-level keys are kept. No `.pre-m2.bak` was written.
+    - After a request write and two reopens, the `.bak` is still identical to the original, and reopening does not touch the file.
+    - An existing `.pre-m3.bak` is never overwritten (a sentinel survives).
+    - A v4 file throws and is left untouched.
+    - **Shown to fail:** with the `existsSync` guard removed, the sentinel check goes red.
+    - The worker's note "second open also stamps `.pre-m3.bak`" refers to a stronger test assertion (the mtime is unchanged on the second open), not to a rewrite.
+  - **C-10 hash:**
+    - Setup: canonical strings captured from inside `acceptRequest` by wrapping `buyerTermsHash`, on a rate-based offer. Its base is `864201357`, its markup is `97531`, the snapshot notes are `NOTESCANARY`, the source is `rateSECRETID`, and the seller and buyer ids and subs are canaries.
+    - Both the seller-accept and the counter-accept canonicals contain none of these values, and none of `baseMinor`, `markup`, `snapshot`, `sub` or `companyId`.
+    - Each stored hash equals SHA-256 of the captured string.
+    - **Shown to fail:** with `baseMinor` appended to `codeShareLine`, both canonicals are flagged.
+  - **Roles:** each of 9 wrong-role POSTs is refused with the file byte-identical:
+    - the buyer accepts, declines or counters a pending request;
+    - the seller accepts, declines or counters a countered request;
+    - the seller withdraws a pending or a countered request;
+    - a second buyer accepts someone else's request.
+  - **Third company:** GET and all four actions on a pending and on a countered request each return a 404 byte-identical to an unknown id, and persist nothing. `/requests` shows neither request.
+  - **D-19 names:** hidden from both sides before acceptance, and the seller sees "A contract owner". Shown to both after acceptance. **After the buyer disconnects, the seller's accepted request shows no buyer name.** Recorded as F-12.
+  - **F-11:**
+    - On T6: a manual create with base `0` or blank gives "Fix the 1 field" with only `#baseAmount`. A bad quantity alone gives 1 field. Base `0` plus a bad quantity gives 2.
+    - On `main` the same inputs give 2 fields and 3 fields, with `#baseMinor`. So the bug is reproduced there and fixed here.
+  - **Escaping:** `test/requests.test.js` asserts a markup-bearing code-share name on `/requests` and `/requests/:rid`, and markup in counter service terms, all escaped. This covers what the prompt asked for, and `test/offers.test.js` was out of scope.
+- **Changed existing tests** (`records.test.js`, `versions.test.js`): the schema moves 2 → 3, the "throws on 3" test becomes "throws on 4" and also asserts no `.pre-m3.bak`, and M-3 `.bak` and mtime assertions are added. These strengthen the tests. No assertion was loosened.
+- **Bot:** Cursor Bugbot had not run while the PR was a draft. The planner marked #26 ready for review on 2026-09-30 to trigger it. It reported one finding on `96c05d0`, and it is **real, and blocking**:
+  - `/requests/:rid` never shows the requested quantity. The only "Quantity" on the page is the listed amount of the pinned version.
+  - Reproduced: the buyer requests 3 of 10. Both parties' pages say "Quantity 10 containers" and never "3". The seller clicks Accept, and 3 is committed.
+  - So the acceptance screen does not show what Accept agrees to. The planner's probes missed this, because none of them asserted the rendered quantity.
+  - **Fix shown to work** in the scratch clone: add a "Requested: N" line and relabel the listed amount "Listed quantity". The probe then finds 3 on both pages, and the suite still passes 135 tests. So no existing test covers this.
+- **Litter:** the T6 worker left `/tmp/oceanrelay-t6-preview.js`, `/tmp/oceanrelay-t6-preview.json` and `$TMPDIR/oceanrelay-t6-preview-*`. `$TMPDIR/oceanrelay-t9-browser-*` is left over from T9. All are mock data. The operator deletes them.
+
+Better than asked:
+- `totalMinor` uses a BigInt overflow check.
+- A request can still be declined or withdrawn once it reads as superseded, so a stale request can be closed.
+- The worker disclosed the name-lookup gap themselves.
+
+**F-12 (folded into T6 round 2, because C-9 is not yet merged and T6 owns it):**
+- **The problem:** D-19 names come from live connection rows in the token store. `lib/routes/requests.js` `companyNames` reads the store file directly. Those rows are deleted on disconnect or revocation, so after an accepted deal, a party that has disconnected shows a blank name.
+- **Fix:**
+  - Store `buyerCompanyName` on the request at `createRequest`, and `sellerCompanyName` at the seller's `counterRequest` or `acceptRequest`, both from the acting identity.
+  - Remove the store-file read.
+  - No stored request predates T6, so no fallback is needed.
+- **Contract:** C-9 is amended in place before merge (see `docs/decisions.md`).
+- **Test:** after acceptance, delete the buyer's connection, and the seller page still shows the buyer's name. Before acceptance, neither page contains the other party's name.
+
+**Round 2 (dispatched 2026-09-30):**
+- the Bugbot quantity finding;
+- F-12;
+- resolve the Bugbot thread once fixed.
+
 ---
 
 ## 7. Operator reports
@@ -667,6 +733,7 @@ This section holds what previously lived only in the planning conversation. It i
   alarm this way).
 - **Text probes collide with navigation.** The text "Your offer" also matches the nav
   link "Your offers"; match on markup (for example `class="yours"`) instead.
+- **Bugbot does not run on draft PRs.** Mark the PR ready (`gh pr ready <n>`) before reviewing, and wait for its check. On #26, "no Bugbot comments" meant it had never run, and its first run found a blocking defect.
 - **Check bot comments on every PR before calling it done.** Cursor Bugbot runs on each
   PR. It was a false positive on #10 (it claimed URL path decoding) and a real bug on #21
   (F-11). Verify against the reviewed SHA, and record which of the two it was.
