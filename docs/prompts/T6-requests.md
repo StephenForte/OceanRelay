@@ -134,6 +134,20 @@ available".
 **Navigation:** add "Requests" to the nav in `lib/views/offers.js`, and to the connected
 home page (`lib/page.js`).
 
+### d. Also fix F-11 (a T9 bug on `main`, in files this task owns)
+
+The "Not saved. Fix the N fields marked below" summary on the offer create and edit forms
+counts the internal `baseMinor` error. A manual create with a base price of `0` or blank
+says "Fix the 2 fields" and links to `#baseMinor`, which does not exist on the page
+(`combineErrors` in `lib/routes/offers.js`, and the summary in `lib/views/offers.js`).
+
+Fix it so the summary counts and links only fields that have a marker on the form:
+- for manual offers, fold the `baseMinor` error into `baseAmount`;
+- for rate-based offers, drop it.
+
+Test: a manual create with base `0` shows "Fix the 1 field marked below" and no
+`#baseMinor` link. A single bad quantity still shows 1 field.
+
 **Number parsing:** counter prices use `lib/money.js` (string parsing, the currency's
 exponent). Quantities are whole numbers from strings. Compute `totalMinor` with a
 safe-integer check; refuse rather than overflow.
@@ -360,4 +374,4 @@ EXISTING TESTS MODIFIED lets the reviewer judge strengthening versus weakening w
 hunting for the change. RISKS AND FOLLOW-UPS is where an honest gap gets checked instead
 of becoming an incident.
 
-/goal T6 is done when branch `task/T6-requests`, rebased on current `main`, passes `node --check` and `npm test` with every test listed above present, two concurrent HTTP acceptances that together exceed the available quantity result in exactly one acceptance, a request pinned to a superseded version cannot be accepted, every wrong-role action is refused with nothing persisted, the stored terms hash contains no seller-private field, M-3 migrates a populated v2 file with a byte-identical backup, and a draft PR exists whose description holds the filled-in handoff block.
+/goal T6 is done when the F-11 error-summary test passes, and when branch `task/T6-requests`, rebased on current `main`, passes `node --check` and `npm test` with every test listed above present, two concurrent HTTP acceptances that together exceed the available quantity result in exactly one acceptance, a request pinned to a superseded version cannot be accepted, every wrong-role action is refused with nothing persisted, the stored terms hash contains no seller-private field, M-3 migrates a populated v2 file with a byte-identical backup, and a draft PR exists whose description holds the filled-in handoff block.
