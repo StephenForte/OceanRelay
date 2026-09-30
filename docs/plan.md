@@ -116,7 +116,7 @@ Planned split, subject to revision after Phase 3 lands:
 | --- | --- | --- |
 | T5 | Offer versions (C-7, M-2), records `view` (C-6), edit, publish/pause, derived expiry (D-14, D-15), F-6, F-7 | **approved 2026-09-29, PR #18 at `df275bf`** (review in §6) — `docs/prompts/T5-versions-publish.md`. Split on 2026-09-29: marketplace and buyer page moved to T9. |
 | T9 | **merged `e0f3590` 2026-09-30, PR #21 at `8aaa060`** (review in §6). Prompt: `docs/prompts/T9-marketplace.md`. Marketplace search and filters (D-17, C-8), F-9 and F-10 from the T5 review, operator-reported usability fixes (§7, 2026-09-29), buyer offer page (published, non-expired, current version via `buyerView`), and the buyer-view formatting fixes from the A-3 screenshot (§7), plus F-8 (rate chooser search and filters, §7 O-9) | Blocked on T5. New id; ids are never renumbered. |
-| T6 | Requests, accept/decline/counter, availability accounting (D-18, D-19, C-9, C-10, M-3) | **round 2 dispatched 2026-09-30** — PR #26: first round `96c05d0` changes requested (Bugbot quantity finding, plus F-12; review in §6) — `docs/prompts/T6-requests.md`. D-19 confirmed by the operator. | The concurrency task. D-3's synchronous-mutation rule is the core invariant; test with overlapping requests. |
+| T6 | Requests, accept/decline/counter, availability accounting (D-18, D-19, C-9, C-10, M-3) | **approved 2026-09-30, PR #26 at `33eddef`**, awaiting merge (round 1 `96c05d0` changes requested; review in §6) — `docs/prompts/T6-requests.md`. D-19 confirmed by the operator. | The concurrency task. D-3's synchronous-mutation rule is the core invariant; test with overlapping requests. |
 | T7 | Post-acceptance carrier statuses, cancellation, dispute state | Mutual-cancel or unresolved dispute only (PRD Phase 4). |
 | T8 | Audit log and operator review screen | Operator identity decided as D-16 (`OCEANRELAY_OPERATOR_SUBS`). T8 also shows users their Rate Ninja `sub`. |
 | A-4 | Phase 4 acceptance with accounts O-4(a) and O-4(c) | |
@@ -553,6 +553,20 @@ Better than asked:
 - F-12;
 - resolve the Bugbot thread once fixed.
 
+**T6 round 2, `33eddef` (on top of `d985002`, the rebased round 1), approved 2026-09-30:**
+- **Base and scope:** merge-base `8683e67` = `origin/main`. Round 2 touches only `lib/records.js`, `lib/routes/requests.js`, `lib/views/requests.js` and `test/requests.test.js`. No off-limits path.
+- **Gate re-run** in a scratch clone: 136 pass, 0 fail, 0 skip. This matches the handoff.
+- **Bugbot finding fixed.** When the buyer requests 3 of 10, both parties now see 3 in `#requested-quantity`, and the listed amount is labelled "Listed quantity". Accept commits 3. A countered request shows an "Accept commits these terms" panel (the worker's test checks 4 × 25.00 = 100.00).
+- **F-12 fixed.** The store-file read is gone. Names come from the request record.
+  - After the buyer disconnects, the seller still sees the buyer's name, and after the seller disconnects, the buyer still sees the seller's.
+  - Neither name appears on a pending or countered request, on `/requests`, on `/offers/:id` or on `/market/:id`.
+  - Neither name is in the C-10 canonical string. The forbidden list was extended with the company names.
+  - **Shown to fail:** with `reveal = true`, the leak checks go red. With the buyer name not stored, the disconnect check goes red.
+- **Round-1 probes re-run on round 2:** concurrency (5 + 5 rounds), roles, the byte-identical 404, the hash, and M-3 on the real v2 file. All pass.
+- **Bugbot:** the round-1 thread was replied to ("Fixed in 33eddef") and resolved. Bugbot did not fire on the force-push. The planner triggered it with a `bugbot run` comment, and it finished with `success` and no new findings.
+- **Litter:** none, in `/tmp` or `$TMPDIR`. The worker's round-1 leftovers were deleted by the operator.
+- **Planner error, recorded:** the first run of my disconnect probe queried as the buyer while the buyer was still disconnected, which gave two false failures. The probe was corrected and re-run.
+
 ---
 
 ## 7. Operator reports
@@ -733,7 +747,7 @@ This section holds what previously lived only in the planning conversation. It i
   alarm this way).
 - **Text probes collide with navigation.** The text "Your offer" also matches the nav
   link "Your offers"; match on markup (for example `class="yours"`) instead.
-- **Bugbot does not run on draft PRs.** Mark the PR ready (`gh pr ready <n>`) before reviewing, and wait for its check. On #26, "no Bugbot comments" meant it had never run, and its first run found a blocking defect.
+- **Bugbot does not run on draft PRs, and did not re-run after a force-push on #26** (comment `bugbot run` to trigger it). Mark the PR ready (`gh pr ready <n>`) before reviewing, and wait for its check. On #26, "no Bugbot comments" meant it had never run, and its first run found a blocking defect.
 - **Check bot comments on every PR before calling it done.** Cursor Bugbot runs on each
   PR. It was a false positive on #10 (it claimed URL path decoding) and a real bug on #21
   (F-11). Verify against the reviewed SHA, and record which of the two it was.
