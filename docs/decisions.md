@@ -183,6 +183,58 @@ built solely from `buyerView` of the offer's current version.
   Whether buyers see the seller's company is left to T6, where both identities are
   recorded on acceptance.
 
+### D-18 — Request lifecycle and availability (2026-09-30)
+
+- **Who can request.** A buyer requests a quantity of the offer's **current published
+  version**. The request pins that version number. A company cannot request its own
+  offer.
+- **What "available" means.** Available quantity = the current version's quantity minus
+  the sum of **accepted** quantities on that offer, across all versions. Pending and
+  countered requests do not reserve anything.
+  - The check happens at request time (quantity ≤ available) and again, authoritatively,
+    at acceptance, inside one synchronous `transact` (D-3). Two acceptances that together
+    exceed the available quantity cannot both succeed.
+- **States.** `pending`, `countered`, `accepted`, `declined`, `withdrawn`.
+  - The seller accepts, declines or counters a `pending` request.
+  - The buyer accepts or declines a `countered` request.
+  - The buyer may withdraw while `pending` or `countered`.
+  - `accepted`, `declined` and `withdrawn` are final.
+- **Superseded is derived, like expiry.** A pending or countered request whose pinned
+  version is no longer the offer's current version reads as `superseded` and cannot be
+  accepted (PRD: "pending acceptance of the old version does not carry over").
+- **Acceptance needs a live offer.** The offer must be published, not expired, and its
+  current version must equal the pinned version.
+- **A counter is a request-scoped new version.** The PRD says "A counter is a new
+  version, and the buyer accepts that version afresh". A counter is a seller-proposed
+  `{ quantity, unitBuyerMinor, serviceTerms }` attached to the request, numbered from 1.
+  It does not create a public offer version. A buyer's acceptance of a counter uses the
+  counter's terms.
+- **What an acceptance records** (PRD Phase 4):
+  - offer id and version, counter number or none;
+  - quantity, unit buyer price, currency and total;
+  - both Rate Ninja identities (seller and buyer `companyId` and `sub`);
+  - acceptance time and actor;
+  - the D-13 buyer-terms hash (C-10).
+- **Copy on every request and acceptance screen:**
+  - "Accepted in OceanRelay means a marketplace agreement. It is not a carrier booking."
+  - "This quantity limit applies only inside OceanRelay. It does not hold carrier space
+    or stop the seller promising the same space elsewhere."
+- **Out of T6:** post-acceptance carrier statuses and cancellation (T7), audit (T8).
+
+### D-19 — Seller and buyer names are revealed on acceptance (2026-09-30, planner default; operator to confirm)
+
+The seller's and buyer's Rate Ninja company names are hidden from each other while
+browsing, requesting and negotiating. The buyer sees the code-share line, and the seller
+sees "a contract owner". Once a request is accepted, both company names show on that
+request for both parties, because they now have an agreement to perform.
+
+Reason: the code-share name is the seller's chosen public label, and neither side needs
+the other's identity until there is a deal.
+
+If the operator prefers names visible from the start, this decision is superseded and
+T6's views change. The records are unaffected, because both identities are stored
+either way.
+
 ## Interface contracts
 
 A contract is the surface other tasks build on. The task named as owner publishes it; later
@@ -318,3 +370,48 @@ empty market. As built and reviewed, `view` is
 The `carrier` filter matches the operating carrier in the buyer view's code-share line:
 a filter for the operating carrier matched, and a filter for the code-share name did not.
 C-4's buyer view has no separate carrier field.
+
+### C-9 — Request record, schema v3 (owner: T6)
+
+Records file `schemaVersion: 3`, produced from v2 by migration **M-3**. M-3 adds a
+top-level `requests: {}`, and nothing else changes. It follows the same rules as M-2:
+copy to `<path>.pre-m3.bak` first (mode 0600, never overwritten), keep unknown keys, and
+throw on a version above 3.
+
+```
+requests[id] = {
+  id, offerId, version, createdAt,
+  sellerCompanyId, buyerCompanyId, buyerSub,
+  quantity,
+  state: "pending" | "countered" | "accepted" | "declined" | "withdrawn",
+  counters: [{ n, quantity, unitBuyerMinor, serviceTerms, at, by }],
+  history: [{ from, to, actor, at, counter }],
+  acceptance: null | {
+    at, by, offerId, version, counter,          // counter: n or null
+    quantity, unitBuyerMinor, currency, totalMinor,
+    sellerCompanyId, sellerSub, buyerCompanyId, buyerSub,
+    termsVersion: 1, termsHash
+  }
+}
+```
+
+`sellerSub` in the acceptance is the seller-side user who accepted, or, for an accepted
+counter, the user who made the counter.
+
+### C-10 — Buyer-terms canonical form and hash (owner: T6; implements D-13)
+
+`lib/terms-hash.js`, pure:
+- `buyerTermsCanonical(fields)` produces a string with sorted keys and `"v": 1` first.
+- `buyerTermsHash(canonical)` produces hex SHA-256.
+
+The fields are exactly what the buyer agreed to:
+- `offerId`, `version`, `counter`;
+- `codeShareLine`, `origin`, `destination`, `equipment`, `unit`, `quantity`;
+- `sailingStart`, `sailingEnd`, `cutoffDate`, `validityDeadline`;
+- `currency`, `unitBuyerMinor`, `totalMinor`;
+- `serviceTerms`, `capacityStatus`.
+
+It never includes `baseMinor`, `markup`, the snapshot, the source id, or any `sub` or
+`companyId`. The hash is computed once, at acceptance, and stored. It is unsalted
+because it contains only terms both parties saw; Phase 5 adds the salted on-chain
+commitment. C-4's `canonicalTerms` v1 is not used for acceptances (D-13).
