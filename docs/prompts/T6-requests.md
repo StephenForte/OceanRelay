@@ -33,9 +33,10 @@ booking."
 Today a buyer can find an offer on `/market/:id` (T9) but cannot ask for it:
 
 ```
-$ grep -c "requests" lib/records.js lib/routes/market.js
+$ grep -c "createRequest\|/requests" lib/records.js lib/routes/market.js lib/routes/offers.js
 lib/records.js:0
 lib/routes/market.js:0
+lib/routes/offers.js:0
 ```
 
 ## What to build
