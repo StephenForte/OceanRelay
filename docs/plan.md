@@ -471,6 +471,22 @@ mapped from a fixed table.
 No follow-ups opened. The worker's notes on seller-company visibility (T6) and market
 pagination (not needed at pilot volume) stand as already planned.
 
+**T9 post-merge bot finding (Cursor Bugbot on `8aaa060`, 2026-09-29): real, missed by the planner.**
+The "Not saved" error summary lists every key on the `errors` object, including the
+internal `baseMinor`. Reproduced on `main` at `392fed2` against the mock: a manual create
+with a base price of `0` or blank renders "Fix the 2 fields marked below", with links to
+`#baseMinor` (no such target on the page) and `#baseAmount`. A single bad quantity counts
+correctly. The planner's T9 probe covered only a missing currency.
+
+- **F-11 (folded into T6, which owns both files):** the summary counts and links only
+  fields that have a marker on the form. The internal `baseMinor` error is folded into
+  `baseAmount` (manual) or dropped (rate-based). Test: a manual create with base `0` shows
+  "1 field" and no `#baseMinor` link.
+- An uncommitted local fix for this was found in the operator's Mac checkout of
+  `task/T9-marketplace`, apparently started from the bot's "Fix in Cursor" link. It was
+  never pushed or reviewed. The operator stashed it to clean the checkout; the fix lands
+  through T6 instead.
+
 ---
 
 ## 7. Operator reports
