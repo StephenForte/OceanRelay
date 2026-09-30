@@ -86,7 +86,7 @@ Status values: `ready` (prompt written, can dispatch), `blocked-on <x>`, `dispat
 | O-1 | Disconnect: connected owner clicks Disconnect; page shows Disconnected; reconnect works. | done 2026-09-29 |
 | O-2 | Revoke: revoke OceanRelay in Rate Ninja consents; wait 10+ minutes (access token lifetime); reload OceanRelay; it shows Disconnected (refresh fails with `invalid_grant`). | done 2026-09-29 (operator ran both directions) |
 | O-3 | Refused company: a Freight Forwarder/Customer account attempts Connect and sees the contract-owner-only message. | open |
-| O-4 | **Provision test accounts on Rate Ninja** now, because Phases 3–4 cannot be accepted without them: (a) contract owner with rates — exists; (b) contract owner with no rates; (c) a second contract owner at a **different company** (Phase 4 buyer); (d) a customer-company account for O-3. | open — (c) in progress; operator reports it is not simple to set up (2026-09-29) |
+| O-4 | **Provision test accounts on Rate Ninja** now, because Phases 3–4 cannot be accepted without them: (a) contract owner with rates — exists; (b) contract owner with no rates; (c) a second contract owner at a **different company** (Phase 4 buyer); (d) a customer-company account for O-3. | done 2026-09-30 — one account (`co-test-buyer` / `testbuyer`, no rates, separate company) covers (b) and (c) |
 | O-5 | Confirm the Node version the Render service runs (Render dashboard or `NODE_VERSION` env). Needs ≥ 20.12. | open |
 | O-6 | **Done 2026-09-28 (operator verified /config).** Before merging PR #6: set `OCEANRELAY_RECORDS_PATH=/var/data/oceanrelay-records.json` on the Render service, the same persistent disk as the token store. The default `data/oceanrelay-records.json` is on Render's ephemeral filesystem, so offers written there would vanish on the next deploy. | done |
 
@@ -103,7 +103,7 @@ Status values: `ready` (prompt written, can dispatch), `blocked-on <x>`, `dispat
 | Id | Task | Owns | Model | Status |
 | --- | --- | --- | --- | --- |
 | T4 | Offer draft + preview, rate-based and manual; source-rate change/expiry warning. **Also carries F-1, F-2, F-4, F-5** (§6). | `lib/routes/offers.js`, `lib/views/offers.js`, offer methods in `lib/records.js`, `test/offers.test.js` | strong | merged `d7b3fd8` 2026-09-28, PR #14 at `40278e5` (review in §6) |
-| A-3 | **Phase 3 acceptance (operator, deployed): accepted 2026-09-29 with one deferred check (a no-rates owner's manual offer; see §7).** owner with rates saves and previews an offer from a rate; owner with no rates saves and previews a manual offer; both previews say quantity is the seller's claim. Requires O-1, O-2, O-4(b). | — | — | blocked-on T4 |
+| A-3 | **Phase 3 acceptance (operator, deployed): fully accepted 2026-09-30.** The deferred no-rates check passed with `testbuyer` (see §7). owner with rates saves and previews an offer from a rate; owner with no rates saves and previews a manual offer; both previews say quantity is the seller's claim. Requires O-1, O-2, O-4(b). | — | — | blocked-on T4 |
 
 T4's prompt is written when Wave A has merged, against the contracts as merged, not as
 planned.
@@ -116,7 +116,7 @@ Planned split, subject to revision after Phase 3 lands:
 | --- | --- | --- |
 | T5 | Offer versions (C-7, M-2), records `view` (C-6), edit, publish/pause, derived expiry (D-14, D-15), F-6, F-7 | **approved 2026-09-29, PR #18 at `df275bf`** (review in §6) — `docs/prompts/T5-versions-publish.md`. Split on 2026-09-29: marketplace and buyer page moved to T9. |
 | T9 | **merged `e0f3590` 2026-09-30, PR #21 at `8aaa060`** (review in §6). Prompt: `docs/prompts/T9-marketplace.md`. Marketplace search and filters (D-17, C-8), F-9 and F-10 from the T5 review, operator-reported usability fixes (§7, 2026-09-29), buyer offer page (published, non-expired, current version via `buyerView`), and the buyer-view formatting fixes from the A-3 screenshot (§7), plus F-8 (rate chooser search and filters, §7 O-9) | Blocked on T5. New id; ids are never renumbered. |
-| T6 | Requests, accept/decline/counter, availability accounting (D-18, D-19, C-9, C-10, M-3) | **ready** — `docs/prompts/T6-requests.md`. D-19 confirmed by the operator. | The concurrency task. D-3's synchronous-mutation rule is the core invariant; test with overlapping requests. |
+| T6 | Requests, accept/decline/counter, availability accounting (D-18, D-19, C-9, C-10, M-3) | **dispatched 2026-09-30** — `docs/prompts/T6-requests.md`. D-19 confirmed by the operator. | The concurrency task. D-3's synchronous-mutation rule is the core invariant; test with overlapping requests. |
 | T7 | Post-acceptance carrier statuses, cancellation, dispute state | Mutual-cancel or unresolved dispute only (PRD Phase 4). |
 | T8 | Audit log and operator review screen | Operator identity decided as D-16 (`OCEANRELAY_OPERATOR_SUBS`). T8 also shows users their Rate Ninja `sub`. |
 | A-4 | Phase 4 acceptance with accounts O-4(a) and O-4(c) | |
@@ -619,3 +619,13 @@ label fix goes to T9 alongside the buyer-panel fixes.
     label, so copying it would have shown and linked Kings' rates to the test company.
   - **Next:** connect OceanRelay as `testbuyer`, confirm the "no rates" path (the
     deferred A-3 check), and use the account as the Phase 4 buyer (A-4).
+- **A-3 closed, 2026-09-30.** As `testbuyer` on the deployed service, the operator ran
+  all six checks:
+  1. connected;
+  2. the company shows as Test Buyer Co;
+  3. New offer says "no rates … enter an offer by hand";
+  4. a manual offer saved and previewed with the seller-claim sentence;
+  5. the Marketplace lists the main account's offers without the "Your offer" badge;
+  6. the buyer page shows no buy price, markup or minor units.
+
+  **Phase 3 is accepted.** T6 was dispatched the same day.
