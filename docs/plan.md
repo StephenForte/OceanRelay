@@ -115,8 +115,8 @@ Planned split, subject to revision after Phase 3 lands:
 | Id | Task | Notes |
 | --- | --- | --- |
 | T5 | Offer versions (C-7, M-2), records `view` (C-6), edit, publish/pause, derived expiry (D-14, D-15), F-6, F-7 | **approved 2026-09-29, PR #18 at `df275bf`** (review in §6) — `docs/prompts/T5-versions-publish.md`. Split on 2026-09-29: marketplace and buyer page moved to T9. |
-| T9 | **approved 2026-09-30, PR #21 at `8aaa060`** (review in §6). Prompt: `docs/prompts/T9-marketplace.md`. Marketplace search and filters (D-17, C-8), F-9 and F-10 from the T5 review, operator-reported usability fixes (§7, 2026-09-29), buyer offer page (published, non-expired, current version via `buyerView`), and the buyer-view formatting fixes from the A-3 screenshot (§7), plus F-8 (rate chooser search and filters, §7 O-9) | Blocked on T5. New id; ids are never renumbered. |
-| T6 | Requests, accept/decline/counter, availability accounting. F-3 decided as D-13 (buyer-terms hash). Unblocked once PR #21 merges. | The concurrency task. D-3's synchronous-mutation rule is the core invariant; test with overlapping requests. |
+| T9 | **merged `e0f3590` 2026-09-30, PR #21 at `8aaa060`** (review in §6). Prompt: `docs/prompts/T9-marketplace.md`. Marketplace search and filters (D-17, C-8), F-9 and F-10 from the T5 review, operator-reported usability fixes (§7, 2026-09-29), buyer offer page (published, non-expired, current version via `buyerView`), and the buyer-view formatting fixes from the A-3 screenshot (§7), plus F-8 (rate chooser search and filters, §7 O-9) | Blocked on T5. New id; ids are never renumbered. |
+| T6 | Requests, accept/decline/counter, availability accounting (D-18, D-19, C-9, C-10, M-3) | **ready** — `docs/prompts/T6-requests.md`. D-19 confirmed by the operator. | The concurrency task. D-3's synchronous-mutation rule is the core invariant; test with overlapping requests. |
 | T7 | Post-acceptance carrier statuses, cancellation, dispute state | Mutual-cancel or unresolved dispute only (PRD Phase 4). |
 | T8 | Audit log and operator review screen | Operator identity decided as D-16 (`OCEANRELAY_OPERATOR_SUBS`). T8 also shows users their Rate Ninja `sub`. |
 | A-4 | Phase 4 acceptance with accounts O-4(a) and O-4(c) | |
@@ -569,3 +569,42 @@ label fix goes to T9 alongside the buyer-panel fixes.
   owner **at a different company, with no rates** satisfies both O-4(b) (the no-rates
   check for A-3) and O-4(c) (the second company for the Phase 4 acceptance, A-4). Phase 3
   is marked **accepted with one deferred check**, which is run when that account exists.
+
+### Operator report after T9 deploy, 2026-09-30
+
+- "Everything worked" on the deployed service: the marketplace, the buyer page, the
+  chooser and the formatting.
+- **"Still says v1":** it is not yet clear which action was expected to create v2.
+  Asked the operator to open the offer preview and read the new state and version
+  history (T9): whether "Published" appears before the edit, and which banner showed
+  after saving ("Saved as a draft (version 1)" means the offer was a draft; "Saved as
+  version N" means it was published). An edit after publish created v2 in every local
+  test (T5 and T9 reviews). **If the history shows publish → edit → still v1, that is a
+  defect, to be investigated before T6 merges.**
+- **O-4, a second Rate Ninja company:** Rate Ninja has no admin screen or API to create
+  a company (`/api/admin/companies` is GET-only; `lib/foundation.js` seeds only the
+  known companies). Rate Ninja stores data in SQLite (`node:sqlite`, `SQLITE_DB_PATH`).
+  The planner gave the operator an INSERT for one company and one user, plus the
+  existing `scripts/set-password.js`. It is **untested**: running Rate Ninja's code in
+  the planner session was not permitted. The operator was told to back up the database
+  first and to verify by signing in. The durable fix, a Rate Ninja admin "create company
+  and user" feature, belongs to the Rate Ninja repo and is outside this PRD; it is noted
+  as a candidate Rate Ninja task.
+
+### Operator follow-up, 2026-09-30
+
+- **"Still says v1": resolved.** The operator reports it is fixed now: an edit after
+  publish shows the next version. No defect.
+- **D-19 confirmed:** company names are revealed on acceptance.
+- **Rate Ninja test account: the first SQL attempt failed.**
+  `no such column: "co-test-buyer"` — the planner's statement used double-quoted string
+  literals, which SQLite treats as identifiers. This was a planner error. The failure
+  happened inside the transaction, so nothing should have been written; the operator
+  was given a read-only check to confirm.
+  - A replacement uses bound parameters and an explicit rollback. It was tested by the
+    planner on a scratch SQLite database built with the same `companies` and `users`
+    columns (from `rateninja/lib/db.js`):
+    - the read-only schema and existence check works;
+    - the insert creates the company and user;
+    - a re-run fails with `UNIQUE constraint failed` and leaves no partial write.
+  - Still not tested: Rate Ninja's own sign-in path reading the new rows.
