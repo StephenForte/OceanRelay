@@ -143,6 +143,14 @@ function sessionCookie(sid, csrf) {
   return `${COOKIE_NAME}=${value}`;
 }
 
+function offerPath(location) {
+  return new URL(location, "http://127.0.0.1").pathname;
+}
+
+function offerIdFrom(location) {
+  return offerPath(location).split("/").pop();
+}
+
 async function pageOf(base, cookie, path) {
   const response = await fetch(new URL(path, base), { headers: { cookie } });
   const html = await response.text();
@@ -266,7 +274,7 @@ describe("offer drafts", () => {
       });
       assert.equal(saved.status, 302);
       const location = saved.headers.get("location");
-      assert.match(location, /^\/offers\/[0-9a-f-]{36}$/);
+      assert.match(location, /^\/offers\/[0-9a-f-]{36}\?result=saved_draft$/);
       const reopened = openRecords(recordsPath);
       const listed = reopened.listCompanyOffers("kings");
       assert.equal(listed.length, 1);
@@ -279,7 +287,13 @@ describe("offer drafts", () => {
       assert.match(preview.html, /Private, only you see this/);
       assert.match(preview.html, /What a buyer will see/);
       const buyer = panel(preview.html, "buyer-panel");
-      assert.match(buyer, /165000/);
+      assert.match(buyer, /1,650\.00 USD/);
+      assert.equal(buyer.includes("165000"), false);
+      assert.equal(buyer.includes("minor units"), false);
+      assert.match(buyer, /4 containers/);
+      assert.match(buyer, /Not stated/);
+      assert.match(buyer, /Seller-asserted/);
+      assert.equal(buyer.includes("seller_asserted"), false);
       assert.match(buyer, /operated by/);
       assert.match(buyer, /XYZ, operated by ABC/);
       assert.match(buyer, /Quantity is the seller(?:'|&#39;)s claim/);
@@ -393,7 +407,9 @@ describe("offer drafts", () => {
       const preview = await pageOf(base, cookie, saved.headers.get("location"));
       const buyer = panel(preview.html, "buyer-panel");
       const priv = panel(preview.html, "private-panel");
-      assert.match(buyer, /165000/);
+      assert.match(buyer, /1,650\.00 USD/);
+      assert.equal(buyer.includes("165000"), false);
+      assert.equal(buyer.includes("minor units"), false);
       assert.match(buyer, /operated by ABC/);
       assert.equal(buyer.includes("150000"), false);
       assert.equal(buyer.includes("basis points"), false);
@@ -459,7 +475,7 @@ describe("offer drafts", () => {
         baseAmount: "15",
         ...sellerFields({ markupValue: "0" }),
       });
-      const id = saved.headers.get("location").split("/").pop();
+      const id = offerIdFrom(saved.headers.get("location"));
       const preview = await pageOf(base, cookie, `/offers/${id}`);
       const confirmed = await postForm(base, cookie, `/offers/${id}/capacity-status`, {
         csrf_token: preview.csrf,
@@ -508,7 +524,7 @@ describe("offer drafts", () => {
         equipment: "40HC",
         ...sellerFields(),
       });
-      const id = saved.headers.get("location").split("/").pop();
+      const id = offerIdFrom(saved.headers.get("location"));
       const before = structuredClone(versionOf(onlyOffer(recordsPath)));
       const fresh = await pageOf(base, cookie, `/offers/${id}`);
       assert.equal(fresh.html.includes("source_changed"), false);
@@ -784,18 +800,35 @@ describe("offer drafts", () => {
 
       const versionList = preview.html.slice(preview.html.indexOf('id="version-list"'), preview.html.indexOf("</ol>", preview.html.indexOf('id="version-list"')));
       assertMarkupEscaped(versionList, ["RN-SHARE"], "version list");
-      const edit = await pageOf(base, cookie, `${saved.headers.get("location")}/edit`);
+      const offerPathname = offerPath(saved.headers.get("location"));
+      const filteredChooser = await pageOf(base, cookie, `/offers/new?carrier=${encodeURIComponent(MARKUP)}&origin=CNSHA`);
+      assert.equal(filteredChooser.response.status, 200);
+      assertMarkupEscaped(filteredChooser.html, ["RN-CARRIER"], "chooser filters");
+      assert.equal(filteredChooser.html.includes(`value="${MARKUP}"`), false);
+      const edit = await pageOf(base, cookie, `${offerPathname}/edit`);
       assert.equal(edit.response.status, 200);
       assertMarkupEscaped(edit.html, ["RN-CARRIER", "RN-NOTES", "RN-SHARE", "RN-TERMS"], "edit form");
       assert.equal(edit.html.includes('name="baseMinor"'), false);
       assert.equal(edit.html.includes('name="snapshot"'), false);
-      const published = await postForm(base, cookie, `${saved.headers.get("location")}/state`, {
+      const published = await postForm(base, cookie, `${offerPathname}/state`, {
         csrf_token: preview.csrf,
         to: "published",
       });
       assert.equal(published.status, 302);
-      const editAgain = await pageOf(base, cookie, `${saved.headers.get("location")}/edit`);
-      const changed = await postForm(base, cookie, `${saved.headers.get("location")}/edit`, {
+      const market = await pageOf(base, cookie, "/market");
+      assert.equal(market.response.status, 200);
+      assertMarkupEscaped(market.html, ["RN-CARRIER", "RN-SHARE"], "market list");
+      assert.equal(market.html.includes("RN-NOTES"), false);
+      const marketDetail = await pageOf(base, cookie, `/market/${offerIdFrom(saved.headers.get("location"))}`);
+      assert.equal(marketDetail.response.status, 200);
+      assertMarkupEscaped(marketDetail.html, ["RN-CARRIER", "RN-SHARE", "RN-TERMS"], "market detail");
+      assert.equal(marketDetail.html.includes("RN-NOTES"), false);
+      assert.equal(marketDetail.html.includes("minor units"), false);
+      const marketFilter = await pageOf(base, cookie, `/market?origin=${encodeURIComponent(MARKUP)}`);
+      assert.equal(marketFilter.html.includes(MARKUP), false);
+      assert.equal(marketFilter.html.includes("&lt;img src=x onerror=alert(1)&gt;"), true);
+      const editAgain = await pageOf(base, cookie, `${offerPathname}/edit`);
+      const changed = await postForm(base, cookie, `${offerPathname}/edit`, {
         csrf_token: editAgain.csrf,
         source: "rn_rate",
         equipment: "40HC",

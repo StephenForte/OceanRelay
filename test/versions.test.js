@@ -174,6 +174,14 @@ async function connectOwner({ base, origin }) {
   return { cookie };
 }
 
+function offerPath(location) {
+  return new URL(location, "http://127.0.0.1").pathname;
+}
+
+function offerIdFrom(location) {
+  return offerPath(location).split("/").pop();
+}
+
 function sessionCookie(sid, csrf) {
   const value = encodeURIComponent(signSession({ sid, csrf, iat: Date.now() }, SESSION_SECRET));
   return `${COOKIE_NAME}=${value}`;
@@ -503,7 +511,7 @@ describe("versioned offers", () => {
       assert.equal(renamed.offer.versions[1].terms.codeShareName, "Next");
       assert.equal(renamed.offer.versions[1].terms.baseMinor, 2000);
 
-      const pending = records.setCapacityStatus(COMPANY, created.id, "carrier_pending", ACTOR);
+      const pending = records.setCapacityStatus(COMPANY, created.id, "carrier_pending", ACTOR, "2026-10-02");
       assert.equal(pending.ok, true);
       assert.equal(pending.offer.currentVersion, 3);
       assert.equal(pending.offer.versions[2].capacityStatus, "carrier_pending");
@@ -511,7 +519,7 @@ describe("versioned offers", () => {
       assert.equal(pending.offer.statusHistory.at(-1).version, 3);
       assert.equal(pending.offer.statusHistory.at(-1).to, "carrier_pending");
 
-      const confirmed = records.setCapacityStatus(COMPANY, created.id, "carrier_confirmed", ACTOR);
+      const confirmed = records.setCapacityStatus(COMPANY, created.id, "carrier_confirmed", ACTOR, "2026-10-02");
       assert.equal(confirmed.ok, true);
       assert.equal(confirmed.offer.versions.length, 4);
       assert.equal(confirmed.offer.currentVersion, 4);
@@ -699,20 +707,14 @@ describe("versioned offers", () => {
         overriddenFields: [],
       });
       assert.equal(records.effectiveState(records.getCompanyOffer(COMPANY, draft.id), "2026-11-01"), "draft");
-      const late = records.setOfferState(COMPANY, draft.id, "published", ACTOR, "2026-11-01");
-      assert.equal(late.ok, true);
-      assert.equal(late.offer.state, "published");
-      assert.equal(records.effectiveState(late.offer, "2026-11-01"), "expired");
       const beforeLate = fs.readFileSync(file);
-      const lateEdit = records.editOffer(COMPANY, draft.id, {
-        terms: manualTerms({ validityDeadline: "2026-10-31", quantity: 8 }),
-        overriddenFields: [],
-      }, ACTOR, "2026-11-01");
-      const latePause = records.setOfferState(COMPANY, draft.id, "paused", ACTOR, "2026-11-01");
-      assert.deepEqual(lateEdit, { ok: false, error: "expired" });
-      assert.deepEqual(latePause, { ok: false, error: "expired" });
+      const late = records.setOfferState(COMPANY, draft.id, "published", ACTOR, "2026-11-01");
+      assert.deepEqual(late, { ok: false, error: "deadline_passed" });
       assert.deepEqual(fs.readFileSync(file), beforeLate);
-      assert.equal(records.getCompanyOffer(COMPANY, draft.id).state, "published");
+      const stillDraft = records.getCompanyOffer(COMPANY, draft.id);
+      assert.equal(stillDraft.state, "draft");
+      assert.equal(stillDraft.versions[0].frozen, false);
+      assert.equal(records.effectiveState(stillDraft, "2026-11-01"), "draft");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -738,7 +740,7 @@ describe("seller version screens", () => {
       const preview = await pageOf(base, cookie, saved.headers.get("location"));
       assert.equal(list.response.status, 200);
       assert.equal(preview.response.status, 200);
-      assert.match(list.html, /draft · version 1/);
+      assert.match(list.html, /Draft · version 1 · Seller-asserted/);
       assert.match(preview.html, /id="offer-version">1/);
       assert.deepEqual(fs.readFileSync(recordsPath), before);
       assert.equal(fs.statSync(recordsPath).mtimeMs, mtime);
@@ -756,7 +758,7 @@ describe("seller version screens", () => {
         baseAmount: "20",
         ...sellerFields({ markupType: "absolute", markupValue: "0" }),
       });
-      const id = saved.headers.get("location").split("/").pop();
+      const id = offerIdFrom(saved.headers.get("location"));
       const draft = await pageOf(base, cookie, `/offers/${id}`);
       assert.match(draft.html, />Publish</);
       assert.equal(draft.html.includes(">Pause<"), false);
@@ -804,7 +806,7 @@ describe("seller version screens", () => {
       assert.equal(offer.state, "published");
       assert.deepEqual(offer.stateHistory.map((entry) => entry.to), ["published", "paused", "published"]);
       const list = await pageOf(base, cookie, "/offers");
-      assert.match(list.html, /published · version 1/);
+      assert.match(list.html, /Published · version 1 · Seller-asserted/);
     });
   });
 
@@ -819,7 +821,7 @@ describe("seller version screens", () => {
         equipment: "40HC",
         ...sellerFields(),
       });
-      const location = saved.headers.get("location");
+      const location = offerPath(saved.headers.get("location"));
       const edit = await pageOf(base, cookie, `${location}/edit`);
       assert.equal(edit.response.status, 200);
       assert.match(edit.html, /value="XYZ"/);
@@ -883,7 +885,7 @@ describe("seller version screens", () => {
   });
 
   it("refuses publish and edit once the deadline has passed", async () => {
-    await withApp(async ({ base, origin, recordsPath }) => {
+    await withApp(async ({ base, origin, records, recordsPath }) => {
       const { cookie } = await connectOwner({ base, origin });
       const form = await pageOf(base, cookie, "/offers/new?source=manual");
       const saved = await postForm(base, cookie, "/offers", {
@@ -898,41 +900,76 @@ describe("seller version screens", () => {
         }),
       });
       assert.equal(saved.status, 302);
-      const id = saved.headers.get("location").split("/").pop();
+      const id = offerIdFrom(saved.headers.get("location"));
       const preview = await pageOf(base, cookie, `/offers/${id}`);
       assert.match(preview.html, /id="offer-state">draft/);
       assert.match(preview.html, />Publish</);
+      const beforeRefuse = fs.readFileSync(recordsPath);
       const published = await postForm(base, cookie, `/offers/${id}/state`, {
         csrf_token: preview.csrf,
         to: "published",
       });
-      assert.equal(published.status, 302);
-      const expired = await pageOf(base, cookie, `/offers/${id}`);
+      assert.equal(published.status, 400);
+      const refused = await published.text();
+      assert.match(refused, /The validity deadline has passed\. Edit the offer before publishing\./);
+      assert.deepEqual(fs.readFileSync(recordsPath), beforeRefuse);
+      const untouched = openRecords(recordsPath).getCompanyOffer("kings", id);
+      assert.equal(untouched.state, "draft");
+      assert.equal(current(untouched).frozen, false);
+
+      const formAgain = await pageOf(base, cookie, "/offers/new?source=manual");
+      const second = await postForm(base, cookie, "/offers", {
+        csrf_token: formAgain.csrf,
+        source: "manual",
+        equipment: "40HC",
+        baseAmount: "20",
+        ...sellerFields({ markupType: "absolute", markupValue: "0" }),
+      });
+      assert.equal(second.status, 302);
+      const liveId = offerIdFrom(second.headers.get("location"));
+      const live = await pageOf(base, cookie, `/offers/${liveId}`);
+      const didPublish = await postForm(base, cookie, `/offers/${liveId}/state`, {
+        csrf_token: live.csrf,
+        to: "published",
+      });
+      assert.equal(didPublish.status, 302);
+      records.transact((data) => {
+        data.offers[liveId].versions[0].terms.validityDeadline = "2020-01-01";
+      });
+      const before = fs.readFileSync(recordsPath);
+      const expired = await pageOf(base, cookie, `/offers/${liveId}`);
       assert.match(expired.html, /id="offer-state">expired/);
       assert.equal(expired.html.includes(">Pause<"), false);
       assert.equal(expired.html.includes(">Publish<"), false);
-      const before = fs.readFileSync(recordsPath);
-      const pause = await postForm(base, cookie, `/offers/${id}/state`, {
-        csrf_token: expired.csrf,
+      assert.equal(expired.html.includes("capacity-status"), false);
+      const pause = await postForm(base, cookie, `/offers/${liveId}/state`, {
+        csrf_token: live.csrf,
         to: "paused",
       });
       assert.equal(pause.status, 400);
       assert.match(await pause.text(), /expired/);
-      const edit = await pageOf(base, cookie, `/offers/${id}/edit`);
+      const edit = await pageOf(base, cookie, `/offers/${liveId}/edit`);
       assert.equal(edit.response.status, 400);
-      const posted = await postForm(base, cookie, `/offers/${id}/edit`, {
-        csrf_token: expired.csrf,
+      const posted = await postForm(base, cookie, `/offers/${liveId}/edit`, {
+        csrf_token: live.csrf,
         ...sellerFields({ quantity: "8", validityDeadline: "2020-01-01", markupType: "absolute", markupValue: "0" }),
         source: "manual",
         equipment: "40HC",
         baseAmount: "20",
       });
       assert.equal(posted.status, 400);
+      const capacity = await postForm(base, cookie, `/offers/${liveId}/capacity-status`, {
+        csrf_token: live.csrf,
+        to: "carrier_pending",
+      });
+      assert.equal(capacity.status, 400);
+      assert.match(await capacity.text(), /expired/);
       assert.deepEqual(fs.readFileSync(recordsPath), before);
-      const offer = openRecords(recordsPath).getCompanyOffer("kings", id);
+      const offer = openRecords(recordsPath).getCompanyOffer("kings", liveId);
       assert.equal(offer.state, "published");
       assert.equal(effectiveState(offer, new Date().toISOString().slice(0, 10)), "expired");
       assert.equal(current(offer).terms.quantity, 4);
+      assert.equal(current(offer).capacityStatus, "seller_asserted");
     });
   });
 
@@ -947,7 +984,7 @@ describe("seller version screens", () => {
         baseAmount: "10",
         ...sellerFields({ markupType: "absolute", markupValue: "0", codeShareName: "Hidden Lane" }),
       });
-      const id = saved.headers.get("location").split("/").pop();
+      const id = offerIdFrom(saved.headers.get("location"));
       store.saveConnection("sid-other", {
         refreshToken: "refresh-other",
         scopes: ["profile:read", "rates:read", "sailings:read"],
@@ -1011,7 +1048,7 @@ describe("seller version screens", () => {
         baseAmount: "15",
         ...sellerFields({ markupType: "absolute", markupValue: "0" }),
       });
-      const id = saved.headers.get("location").split("/").pop();
+      const id = offerIdFrom(saved.headers.get("location"));
       const before = fs.readFileSync(recordsPath);
       const edit = await postForm(base, cookie, `/offers/${id}/edit`, {
         ...sellerFields(),
