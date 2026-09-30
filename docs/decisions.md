@@ -221,7 +221,7 @@ built solely from `buyerView` of the offer's current version.
     or stop the seller promising the same space elsewhere."
 - **Out of T6:** post-acceptance carrier statuses and cancellation (T7), audit (T8).
 
-### D-19 — Seller and buyer names are revealed on acceptance (2026-09-30, planner default; operator to confirm)
+### D-19 — Seller and buyer names are revealed on acceptance (2026-09-30, operator confirmed the planner default)
 
 The seller's and buyer's Rate Ninja company names are hidden from each other while
 browsing, requesting and negotiating. The buyer sees the code-share line, and the seller
@@ -231,9 +231,7 @@ request for both parties, because they now have an agreement to perform.
 Reason: the code-share name is the seller's chosen public label, and neither side needs
 the other's identity until there is a deal.
 
-If the operator prefers names visible from the start, this decision is superseded and
-T6's views change. The records are unaffected, because both identities are stored
-either way.
+Confirmed by the operator on 2026-09-30.
 
 ## Interface contracts
 
