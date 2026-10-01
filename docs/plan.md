@@ -117,7 +117,7 @@ Planned split, subject to revision after Phase 3 lands:
 | T5 | Offer versions (C-7, M-2), records `view` (C-6), edit, publish/pause, derived expiry (D-14, D-15), F-6, F-7 | **approved 2026-09-29, PR #18 at `df275bf`** (review in §6) — `docs/prompts/T5-versions-publish.md`. Split on 2026-09-29: marketplace and buyer page moved to T9. |
 | T9 | **merged `e0f3590` 2026-09-30, PR #21 at `8aaa060`** (review in §6). Prompt: `docs/prompts/T9-marketplace.md`. Marketplace search and filters (D-17, C-8), F-9 and F-10 from the T5 review, operator-reported usability fixes (§7, 2026-09-29), buyer offer page (published, non-expired, current version via `buyerView`), and the buyer-view formatting fixes from the A-3 screenshot (§7), plus F-8 (rate chooser search and filters, §7 O-9) | Blocked on T5. New id; ids are never renumbered. |
 | T6 | Requests, accept/decline/counter, availability accounting (D-18, D-19, C-9, C-10, M-3) | **merged `b176cdb` 2026-09-30, PR #26 at `33eddef`**; A-4 (T6 scope) passed 2026-10-01 (round 1 `96c05d0` changes requested; review in §6) — `docs/prompts/T6-requests.md`. D-19 confirmed by the operator. | The concurrency task. D-3's synchronous-mutation rule is the core invariant; test with overlapping requests. |
-| T7 | Post-acceptance carrier statuses, mutual cancellation, disputes, seller decline on countered, marketplace availability (D-20, C-11, M-4, F-13) | **ready 2026-10-01**: `docs/prompts/T7-fulfilment.md`. Model: strongest. Run now; T8 runs after T7 merges (both touch the request record). Operator decision 2026-10-01: an offer at 0 stays listed, greyed out and sorted last. Operator recording of statuses moves to T8. |
+| T7 | Post-acceptance carrier statuses, mutual cancellation, disputes, seller decline on countered, marketplace availability (D-20, C-11, M-4, F-13) | **merged `6d11f17` 2026-10-01, PR #32 at `bfe1986`**. It was merged by the operator before the planner review, which then ran post-merge and found it correct (§6). One follow-up: F-14. Prompt: `docs/prompts/T7-fulfilment.md`. T8 is next. |
 | T8 | Audit log and operator review screen | Operator identity decided as D-16 (`OCEANRELAY_OPERATOR_SUBS`). T8 also shows users their Rate Ninja `sub`. Also: operator recording of carrier statuses (PRD: "seller, buyer, or operator"), on top of T7's C-11. |
 | A-4 | Phase 4 acceptance with accounts O-4(a) and O-4(c) | **T6 scope passed 2026-10-01** (operator, Kings + `testbuyer`, all 7 steps; see §7). Re-run the post-acceptance steps after T7 and T8. |
 
@@ -566,6 +566,52 @@ Better than asked:
 - **Bugbot:** the round-1 thread was replied to ("Fixed in 33eddef") and resolved. Bugbot did not fire on the force-push. The planner triggered it with a `bugbot run` comment, and it finished with `success` and no new findings.
 - **Litter:** none, in `/tmp` or `$TMPDIR`. The worker's round-1 leftovers were deleted by the operator.
 - **Planner error, recorded:** the first run of my disconnect probe queried as the buyer while the buyer was still disconnected, which gave two false failures. The probe was corrected and re-run.
+
+### T7 — PR #32, `bfe1986`, merged `6d11f17` before review; post-merge review 2026-10-01: correct, one follow-up (F-14)
+
+The operator merged #32 by accident before the planner review. The review then ran against `main` at `6d11f17`.
+- **Base and scope:** branched from `bafe338` (the T7 docs merge). Ten files changed, all owned. No off-limits path.
+- **Gate** (scratch clone): 159 pass, 0 fail, 0 skip. This matches the handoff.
+- **Bugbot:** `success` on `bfe1986`, with no comments.
+- **Probes** (standalone, over HTTP, temp files deleted):
+  - **M-4 on a real v3 file:** the file was made by `bafe338`'s own screens, with requests that were accepted via a counter, pending, declined and withdrawn.
+    - `.pre-m4.bak` is byte-identical, mode 0600.
+    - Offers are byte-identical, and each request is byte-identical apart from its `fulfilment` key.
+    - The accepted request got the initial object; the others got `null`.
+    - The second open is a no-op (bytes and mtime unchanged).
+    - A sentinel `.pre-m4.bak` survives.
+    - v5 throws and is left untouched.
+    - A v2 file reaches v4 in one open, leaving both `.bak` files.
+    - Availability on the migrated file is 7.
+  - **Cancel-versus-accept race:** 8 rounds, alternating which fetch starts first. Every round ends with at most 10 counted. When the acceptance landed first it was refused ("no longer available"); otherwise it landed after the cancellation.
+    - **Shown to fail:** with the check removed from `acceptRequest`, rounds 1 and 3 accept while the cancelled 6 still counted.
+    - **The probe's first version did not catch this.** It checked only the end state, which the cancellation tidies up. The fix was to compare `acceptance.at` with the cancellation time. Worth knowing for any future race test.
+    - The worker's suite fails 3 of 3 runs under the same mutation.
+  - **One availability number:**
+    - 10 listed with 3 accepted: the list, the detail page and the seller preview all show 7, and still 7 while the cancellation is disputed.
+    - After agreement, all three show 10, and accepting 10 succeeds.
+    - A rejected agreement keeps its quantity (9 of 10).
+  - **Immutability:** `acceptance` is byte-identical after each of: carrier_pending, carrier_confirmed, rolled, carrier_confirmed again, propose, refuse, propose again, agree.
+  - **Refusals:** 11 wrong-role, wrong-state or illegal-move POSTs, each refused with the file byte-identical. They included `accepted`→`completed`, a 501-character note, the proposer agreeing, refusing or proposing again, the non-proposer withdrawing, and actions on a pending request. `rejected`→`carrier_confirmed` is refused.
+  - **Third company:** GET and all five new POSTs give a byte-identical 404, and nothing is written.
+  - **Copy:**
+    - `accepted` and `carrier_pending` show the not-a-booking sentence and never the word "booked".
+    - `carrier_confirmed` shows "recorded by Buyer One on <date>" and the not-checked sentence.
+    - Markup in a note and in a reason is escaped for both parties.
+    - The seller can decline a countered request.
+  - **F-13:**
+    - On `/market` and `/market?origin=CNSHA`, the offer at 0 has `class="taken"`, says "0 of 10 available" and "Fully taken", and sorts after every open offer.
+    - The list leaves the file's bytes and mtime unchanged.
+    - The detail page says "Listed quantity".
+- **Litter:** none from the worker. The planner's own temp directories were deleted.
+
+**F-14 (operator decision, 2026-10-01, not met): the fully taken row is not visibly greyed out.**
+- **Evidence:** a screenshot against the mock shows the taken row looks like the open rows. `li.taken` only changes the text from `#102a43` to `#334e68`, both dark navy, and the link from green to `#245b8a`.
+- The marketplace row also still carries the listed line ("10 containers — Seller's claim") beside "N of M available", so a buyer still sees "10".
+- **Fix:**
+  - use a real grey for the whole taken row, still at or above 4.5:1 contrast on white (for example `#627d98`);
+  - merge the two quantity lines into one: "N of M containers available in OceanRelay — Seller's claim".
+- **Scope:** `lib/views/market.js` plus a test. Small; it can go as T10 or be folded into T8 if T8 gets the market files. Not yet dispatched.
 
 ---
 
