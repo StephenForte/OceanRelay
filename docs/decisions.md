@@ -299,6 +299,71 @@ rewritten).
 - The detail page shows no request form at 0, as today, and labels the listed figure
   "Listed quantity".
 
+### D-21 — The audit log and the operator screens (2026-10-01)
+
+Implements the PRD Phase 4 requirements:
+- "Authentication, grant and revoke, publish, revision, decisions, status changes, and
+  operator actions are audited. Passwords and tokens are not written in those logs."
+- "The operator can review company, source, status history, and inconsistencies, and
+  cannot silently rewrite accepted terms."
+- The seller, buyer **or operator** may record carrier statuses.
+
+**Where the log lives.** It lives in the records file's existing top-level `audit`
+array, which has been there since M-1 and has been empty until now. No migration is
+needed: the schema stays at 4.
+
+**Writing rules:**
+- An entry is appended **inside the same `transact`** as the change it records, and only
+  when that change succeeds.
+- A refused action writes nothing. That keeps every existing "refusal leaves the file
+  byte-identical" guarantee.
+- Reads, including the operator's own screens, never write.
+- Authentication events (connected, refused, disconnected, connection dropped after a
+  failed refresh or a revoked grant) are not records changes. Each one is appended in a
+  transact of its own.
+
+**Never in the log:**
+- passwords;
+- access or refresh tokens, authorization codes, PKCE verifiers, OAuth `state`;
+- the client secret, the session secret, cookies, CSRF tokens;
+- base prices, markups and Rate Ninja snapshots.
+
+The log records who, what and when, plus small identifying details such as states,
+versions, quantities and counter numbers. The records themselves already hold the
+commercial detail, for the operator screens to show.
+
+**Operator access (D-16).** `OCEANRELAY_OPERATOR_SUBS` is parsed at startup. Every
+`/operator` route checks the signed-in `sub` server-side. A non-operator, signed in or
+not, gets a response byte-identical to an unknown page. `/config` shows only the count.
+The home page shows the signed-in user their Rate Ninja `sub`.
+
+**What the operator can do:**
+- Read everything: companies, offers with source and versions, requests with their
+  counter, state, fulfilment and cancellation history, and the audit log.
+- Record a carrier status on an accepted request, using D-20's table. The role is
+  `operator`, and a note is **required**, saying why the operator and not a party
+  recorded it.
+- Nothing else. The operator cannot cancel, cannot resolve a dispute, and cannot edit
+  any offer, request or acceptance. A dispute stays unresolved until both parties agree
+  (PRD). There is no operator route that writes anything except the carrier status.
+
+**Inconsistencies are derived when read, never stored.** The operator screen lists:
+- **over-committed offers:** the accepted, non-cancelled quantity exceeds the current
+  version's quantity (for example, the seller edited the quantity down after
+  acceptances);
+- **open disputes**, and cancellation proposals awaiting a response;
+- **acceptance integrity failures:** `totalMinor` ≠ `quantity` × `unitBuyerMinor`, a
+  missing `termsHash`, or a request whose offer no longer exists;
+- **accepted requests with no fulfilment object.** This should be impossible after M-4,
+  and a sighting means a bug.
+
+**Size.** The log is unbounded for the pilot. Revisit if the records file passes about
+5 MB.
+
+**F-14 (folded into T8).** The marketplace's fully taken row becomes a real grey, still at
+least 4.5:1 contrast on white. Each row shows one quantity line: "N of M containers
+available in OceanRelay — Seller's claim".
+
 ## Interface contracts
 
 A contract is the surface other tasks build on. The task named as owner publishes it; later
@@ -490,7 +555,7 @@ It never includes `baseMinor`, `markup`, the snapshot, the source id, or any `su
 because it contains only terms both parties saw; Phase 5 adds the salted on-chain
 commitment. C-4's `canonicalTerms` v1 is not used for acceptances (D-13).
 
-### C-11 — Fulfilment record, schema v4 (owner: T7; implements D-20)
+### C-11 — Fulfilment record, schema v4 (owner: T7; implements D-20) — *extended by C-12 (operator role), 2026-10-01*
 
 Records file `schemaVersion: 4`, produced from v3 by migration **M-4**.
 - M-4 gives every request a `fulfilment` key:
@@ -522,3 +587,39 @@ requests[id].fulfilment = null | {
 - C-9's `state` stays `accepted` after acceptance. Fulfilment does not reuse it.
 - Available quantity (D-18 as amended by D-20) is the current version's quantity minus
   the accepted quantity of every request whose `fulfilment.status` is not `cancelled`.
+
+### C-12 — Audit entry and operator actions (owner: T8; implements D-21; extends C-11)
+
+The top-level `audit` array of the records file (schema 4, no migration). Each entry:
+
+```
+{ id, at, event,
+  actor: null | { sub, companyId, role },   // role: "seller" | "buyer" | "operator" | "user"
+  subject: { offerId?, requestId?, version? },
+  detail: { ...small whitelisted fields } }
+```
+
+`event` is one of:
+- `auth.connected`, `auth.refused`, `auth.disconnected`, `auth.dropped`;
+- `offer.created`, `offer.edited`, `offer.state`, `offer.capacity_status`;
+- `request.created`, `request.countered`, `request.accepted`, `request.declined`,
+  `request.withdrawn`;
+- `fulfilment.status`;
+- `cancellation.proposed`, `cancellation.withdrawn`, `cancellation.agreed`,
+  `cancellation.refused`.
+
+What goes in `detail`:
+- For transitions, `from` and `to`.
+- For counters, `counter`.
+- For requests, `quantity`.
+- For `auth.refused`, a reason code; for `auth.dropped`, `reason` (for example
+  `refresh_failed`, `identity_unusable`).
+- Never a token, code, secret, cookie, password, price, markup or snapshot.
+
+`id` is random, `at` is an ISO time, and entries are appended in order. Nothing ever
+edits or deletes an entry.
+
+**Extension to C-11:** a `fulfilment.history` entry's `role` may also be `"operator"`.
+In that case:
+- `actorCompanyId` is the operator's own company;
+- `note` is non-empty.
