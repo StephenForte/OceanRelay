@@ -116,10 +116,10 @@ Planned split, subject to revision after Phase 3 lands:
 | --- | --- | --- |
 | T5 | Offer versions (C-7, M-2), records `view` (C-6), edit, publish/pause, derived expiry (D-14, D-15), F-6, F-7 | **approved 2026-09-29, PR #18 at `df275bf`** (review in §6) — `docs/prompts/T5-versions-publish.md`. Split on 2026-09-29: marketplace and buyer page moved to T9. |
 | T9 | **merged `e0f3590` 2026-09-30, PR #21 at `8aaa060`** (review in §6). Prompt: `docs/prompts/T9-marketplace.md`. Marketplace search and filters (D-17, C-8), F-9 and F-10 from the T5 review, operator-reported usability fixes (§7, 2026-09-29), buyer offer page (published, non-expired, current version via `buyerView`), and the buyer-view formatting fixes from the A-3 screenshot (§7), plus F-8 (rate chooser search and filters, §7 O-9) | Blocked on T5. New id; ids are never renumbered. |
-| T6 | Requests, accept/decline/counter, availability accounting (D-18, D-19, C-9, C-10, M-3) | **approved 2026-09-30, PR #26 at `33eddef`**, awaiting merge (round 1 `96c05d0` changes requested; review in §6) — `docs/prompts/T6-requests.md`. D-19 confirmed by the operator. | The concurrency task. D-3's synchronous-mutation rule is the core invariant; test with overlapping requests. |
-| T7 | Post-acceptance carrier statuses, cancellation, dispute state | Mutual-cancel or unresolved dispute only (PRD Phase 4). |
+| T6 | Requests, accept/decline/counter, availability accounting (D-18, D-19, C-9, C-10, M-3) | **merged `b176cdb` 2026-09-30, PR #26 at `33eddef`**; A-4 (T6 scope) passed 2026-10-01 (round 1 `96c05d0` changes requested; review in §6) — `docs/prompts/T6-requests.md`. D-19 confirmed by the operator. | The concurrency task. D-3's synchronous-mutation rule is the core invariant; test with overlapping requests. |
+| T7 | Post-acceptance carrier statuses, cancellation, dispute state | Mutual-cancel or unresolved dispute only (PRD Phase 4). **Also carries F-13** (§7, 2026-10-01). |
 | T8 | Audit log and operator review screen | Operator identity decided as D-16 (`OCEANRELAY_OPERATOR_SUBS`). T8 also shows users their Rate Ninja `sub`. |
-| A-4 | Phase 4 acceptance with accounts O-4(a) and O-4(c) | |
+| A-4 | Phase 4 acceptance with accounts O-4(a) and O-4(c) | **T6 scope passed 2026-10-01** (operator, Kings + `testbuyer`, all 7 steps; see §7). Re-run the post-acceptance steps after T7 and T8. |
 
 T5, T9 and T6 all touch the offer record; run them in sequence: T5 → T9 → T6.
 
@@ -725,6 +725,30 @@ label fix goes to T9 alongside the buyer-panel fixes.
   6. the buyer page shows no buy price, markup or minor units.
 
   **Phase 3 is accepted.** T6 was dispatched the same day.
+
+---
+
+### 2026-10-01 — A-4, T6 scope (operator, deployed, Kings + `testbuyer`)
+
+Every step passed:
+1. publish 10;
+2. the buyer requests 4 (requested and listed quantities shown, no seller name);
+3. the seller counters 3 (the buyer appears as "A contract owner");
+4. the buyer accepts the counter;
+5. both company names are revealed, with matching terms fingerprints;
+6. the detail page shows "7 of 10 containers available in OceanRelay";
+7. the not-a-carrier-booking copy is present.
+
+Before this, Render's Shell showed `oceanrelay-records.json.pre-m3.bak` and `"schemaVersion":3` after the deploy.
+
+**F-13 (operator-reported; carried by T7):** the marketplace **list** still says "10 containers — Seller's claim" after 3 were accepted. The detail page's terms list shows the same listed figure under its "7 of 10" line.
+- **Cause:** `lib/views/market.js` renders the list row from `buyerView`'s listed quantity, and only the detail page calls `availableQuantity`. The T6 prompt asked for availability on the detail page only, so this is a planner gap, not a worker defect.
+- **Fix:**
+  - Every marketplace row shows "N of M available in OceanRelay".
+  - The detail page's terms label the listed figure "Listed quantity".
+  - The list must compute availability without writing the file.
+- **T7 owns it** because T7's cancellation must return quantity to availability, so the same display is under test there.
+- **Open operator question:** should an offer with 0 available stay on the marketplace, marked as fully taken? The default in T7's prompt is yes, shown and marked, with no request form.
 
 ---
 
