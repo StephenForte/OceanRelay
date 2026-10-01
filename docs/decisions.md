@@ -233,6 +233,72 @@ the other's identity until there is a deal.
 
 Confirmed by the operator on 2026-09-30.
 
+### D-20 — After acceptance: carrier statuses, mutual cancellation and disputes (2026-10-01)
+
+Implements PRD Phase 4: "After acceptance, the seller, buyer, or operator can record
+carrier-pending, carrier-confirmed, rejected, rolled, completed, or cancelled", and
+"After acceptance, cancellation stands when both parties agree. Otherwise the request is
+an unresolved dispute."
+
+**Carrier statuses.**
+- An accepted request carries a fulfilment status, which starts at `accepted`.
+- Either party (the seller's or the buyer's company) may record a carrier status. Each
+  entry records the actor's `sub`, `companyId` and role, the time, and an optional note.
+- Recording by the operator comes with the operator screens (T8).
+- The allowed moves:
+
+  | From | To |
+  | --- | --- |
+  | `accepted` | `carrier_pending`, `carrier_confirmed` |
+  | `carrier_pending` | `carrier_confirmed`, `rejected` |
+  | `carrier_confirmed` | `rolled`, `completed`, `rejected` |
+  | `rolled` | `carrier_pending`, `carrier_confirmed` |
+
+- `rejected` and `completed` take no further carrier status. Any other move is refused.
+
+**Cancellation after acceptance needs both parties.**
+- Either party may propose cancelling, with an optional reason. The other party then
+  agrees, which makes the status `cancelled` (final), or refuses, which opens an
+  unresolved dispute.
+- The proposer may withdraw an unanswered proposal.
+- While a dispute is open, either party may propose again. Agreement then cancels.
+- Cancellation is possible from any status except `completed` and `cancelled`.
+- Carrier statuses may still be recorded while a proposal or a dispute is open, because
+  they are facts about the carrier, not about the agreement.
+- No fee and no payment moves (PRD).
+
+**Before acceptance, the seller may cancel.** This amends D-18: the seller may now
+decline a `countered` request as well as a `pending` one. The buyer's existing actions do
+not change.
+
+**Availability (amends D-18).** A `cancelled` agreement stops counting against the
+offer's available quantity. Every other status keeps counting, including `rejected` and
+an open dispute. OceanRelay cannot know that the space came back, and only the two
+parties agreeing releases it.
+- Planner default, open to the operator: should a carrier rejection release the
+  quantity?
+
+**Accepted terms never change.** `acceptance` and its `termsHash` are written once. No
+fulfilment or cancellation action may modify them (PRD: terms cannot be silently
+rewritten).
+
+**Copy.**
+- `accepted` and `carrier_pending` read as a marketplace agreement, not a carrier
+  booking.
+- `carrier_confirmed`, `rolled` and `completed` say the carrier status was *recorded by*
+  a named party on a date, that OceanRelay has not checked it with the carrier, and that
+  a carrier can still roll, change or cancel a booking.
+- No screen calls anything "booked" without "recorded by".
+- An open dispute reads: "Unresolved dispute. No fee and no payment moves in
+  OceanRelay."
+
+**Marketplace availability (F-13, operator decision 2026-10-01).**
+- Every marketplace row shows "N of M available in OceanRelay".
+- An offer at 0 stays listed: greyed out, marked fully taken, and sorted after every
+  offer that still has quantity. The order among the others is unchanged.
+- The detail page shows no request form at 0, as today, and labels the listed figure
+  "Listed quantity".
+
 ## Interface contracts
 
 A contract is the surface other tasks build on. The task named as owner publishes it; later
@@ -423,3 +489,36 @@ It never includes `baseMinor`, `markup`, the snapshot, the source id, or any `su
 `companyId`. The hash is computed once, at acceptance, and stored. It is unsalted
 because it contains only terms both parties saw; Phase 5 adds the salted on-chain
 commitment. C-4's `canonicalTerms` v1 is not used for acceptances (D-13).
+
+### C-11 — Fulfilment record, schema v4 (owner: T7; implements D-20)
+
+Records file `schemaVersion: 4`, produced from v3 by migration **M-4**.
+- M-4 gives every request a `fulfilment` key:
+  - `null` unless the request's `state` is `accepted`;
+  - `{ status: "accepted", history: [], cancellation: null, cancellationEvents: [] }`
+    if it is.
+- Otherwise M-4 follows M-3's rules: copy to `<path>.pre-m4.bak` first (mode 0600,
+  never overwritten), keep unknown keys, and throw on a version above 4.
+- A v1, v2 or v3 file reaches v4 in one open, leaving each `.bak` it passes through.
+
+```
+requests[id].fulfilment = null | {
+  status: "accepted" | "carrier_pending" | "carrier_confirmed" | "rejected"
+        | "rolled" | "completed" | "cancelled",
+  history: [{ from, to, actorSub, actorCompanyId, role, at, note }],
+  cancellation: null | {
+    state: "proposed" | "disputed",
+    proposedByCompanyId, proposedBySub, proposedAt, reason,
+    respondedByCompanyId, respondedBySub, respondedAt     // null while proposed
+  },
+  cancellationEvents: [{ event, byCompanyId, bySub, role, at, reason }]
+}
+```
+
+- `role` is `"seller"` or `"buyer"`.
+- `event` is `"proposed"`, `"withdrawn"`, `"agreed"` or `"refused"`.
+- `history` records only carrier-status moves and the final move to `cancelled`.
+- `note` and `reason` are strings of at most 500 characters (`""` when none).
+- C-9's `state` stays `accepted` after acceptance. Fulfilment does not reuse it.
+- Available quantity (D-18 as amended by D-20) is the current version's quantity minus
+  the accepted quantity of every request whose `fulfilment.status` is not `cancelled`.
