@@ -118,7 +118,7 @@ Planned split, subject to revision after Phase 3 lands:
 | T9 | **merged `e0f3590` 2026-09-30, PR #21 at `8aaa060`** (review in §6). Prompt: `docs/prompts/T9-marketplace.md`. Marketplace search and filters (D-17, C-8), F-9 and F-10 from the T5 review, operator-reported usability fixes (§7, 2026-09-29), buyer offer page (published, non-expired, current version via `buyerView`), and the buyer-view formatting fixes from the A-3 screenshot (§7), plus F-8 (rate chooser search and filters, §7 O-9) | Blocked on T5. New id; ids are never renumbered. |
 | T6 | Requests, accept/decline/counter, availability accounting (D-18, D-19, C-9, C-10, M-3) | **merged `b176cdb` 2026-09-30, PR #26 at `33eddef`**; A-4 (T6 scope) passed 2026-10-01 (round 1 `96c05d0` changes requested; review in §6) — `docs/prompts/T6-requests.md`. D-19 confirmed by the operator. | The concurrency task. D-3's synchronous-mutation rule is the core invariant; test with overlapping requests. |
 | T7 | Post-acceptance carrier statuses, mutual cancellation, disputes, seller decline on countered, marketplace availability (D-20, C-11, M-4, F-13) | **merged `6d11f17` 2026-10-01, PR #32 at `bfe1986`**. It was merged by the operator before the planner review, which then ran post-merge and found it correct (§6). One follow-up: F-14. Prompt: `docs/prompts/T7-fulfilment.md`. T8 is next. |
-| T8 | Audit log and operator review screen | Operator identity decided as D-16 (`OCEANRELAY_OPERATOR_SUBS`). T8 also shows users their Rate Ninja `sub`. Also: operator recording of carrier statuses (PRD: "seller, buyer, or operator"), on top of T7's C-11. |
+| T8 | Audit log, operator screens and inconsistencies, operator carrier status, the `sub` on the home page, F-14 (D-21, C-12; no migration) | **ready 2026-10-01**: `docs/prompts/T8-audit-operator.md`. Model: strongest. Run now. After merge, the operator sets `OCEANRELAY_OPERATOR_SUBS` in Render, then A-4 is re-run in full. |
 | A-4 | Phase 4 acceptance with accounts O-4(a) and O-4(c) | **T6 scope passed 2026-10-01** (operator, Kings + `testbuyer`, all 7 steps; see §7). Re-run the post-acceptance steps after T7 and T8. |
 
 T5, T9 and T6 all touch the offer record; run them in sequence: T5 → T9 → T6.
@@ -609,9 +609,9 @@ The operator merged #32 by accident before the planner review. The review then r
 - **Evidence:** a screenshot against the mock shows the taken row looks like the open rows. `li.taken` only changes the text from `#102a43` to `#334e68`, both dark navy, and the link from green to `#245b8a`.
 - The marketplace row also still carries the listed line ("10 containers — Seller's claim") beside "N of M available", so a buyer still sees "10".
 - **Fix:**
-  - use a real grey for the whole taken row, still at or above 4.5:1 contrast on white (for example `#627d98`);
+  - use a real grey for the whole taken row, still at or above 4.5:1 contrast on white (for example `#6b7280`, 4.83:1; the planner's first suggestion, `#627d98`, measures 4.28:1 and fails);
   - merge the two quantity lines into one: "N of M containers available in OceanRelay — Seller's claim".
-- **Scope:** `lib/views/market.js` plus a test. Small; it can go as T10 or be folded into T8 if T8 gets the market files. Not yet dispatched.
+- **Scope:** `lib/views/market.js` plus a test. **Folded into T8 (operator decision, 2026-10-01).**
 
 ---
 
