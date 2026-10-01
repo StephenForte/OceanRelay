@@ -23,7 +23,7 @@ const THIRD = { companyId: "third-co", sub: "user-third", companyName: "Third Co
 const MARKUP = "<img src=x onerror=alert(1)>";
 
 const REQUEST_KEYS = [
-  "acceptance", "buyerCompanyId", "buyerCompanyName", "buyerSub", "counters", "createdAt", "history",
+  "acceptance", "buyerCompanyId", "buyerCompanyName", "buyerSub", "counters", "createdAt", "fulfilment", "history",
   "id", "offerId", "quantity", "sellerCompanyId", "sellerCompanyName", "state", "version",
 ];
 const ACCEPTANCE_KEYS = [
