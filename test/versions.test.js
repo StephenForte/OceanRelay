@@ -289,7 +289,7 @@ describe("M-2 records migration", () => {
       assert.equal(mode(bak), 0o600);
 
       const migrated = JSON.parse(fs.readFileSync(file, "utf8"));
-      assert.equal(migrated.schemaVersion, 3);
+      assert.equal(migrated.schemaVersion, 4);
       assert.deepEqual(migrated.requests, {});
       const v2Bak = JSON.parse(fs.readFileSync(`${file}.pre-m3.bak`, "utf8"));
       assert.equal(v2Bak.schemaVersion, 2);
@@ -347,10 +347,12 @@ describe("M-2 records migration", () => {
       const settled = fs.readFileSync(file);
       const settledBak = fs.readFileSync(bak);
       const settledM3 = fs.readFileSync(`${file}.pre-m3.bak`);
-      const mtime = stampFiles([file, bak, `${file}.pre-m3.bak`]);
+      const settledM4 = fs.readFileSync(`${file}.pre-m4.bak`);
+      assert.equal(JSON.parse(settledM4.toString("utf8")).schemaVersion, 3);
+      const mtime = stampFiles([file, bak, `${file}.pre-m3.bak`, `${file}.pre-m4.bak`]);
       const again = openRecords(file);
       again.view((data) => {
-        assert.equal(data.schemaVersion, 3);
+        assert.equal(data.schemaVersion, 4);
         assert.deepEqual(data.requests, {});
         assert.equal(data.offers["rate-1"].customOfferKey.keep, true);
         assert.deepEqual(data.offers["rate-1"].versions[0].snapshot, snapshot);
@@ -358,9 +360,11 @@ describe("M-2 records migration", () => {
       assert.deepEqual(fs.readFileSync(file), settled);
       assert.deepEqual(fs.readFileSync(bak), settledBak);
       assert.deepEqual(fs.readFileSync(`${file}.pre-m3.bak`), settledM3);
+      assert.deepEqual(fs.readFileSync(`${file}.pre-m4.bak`), settledM4);
       assert.equal(fs.statSync(file).mtimeMs, mtime);
       assert.equal(fs.statSync(bak).mtimeMs, mtime);
       assert.equal(fs.statSync(`${file}.pre-m3.bak`).mtimeMs, mtime);
+      assert.equal(fs.statSync(`${file}.pre-m4.bak`).mtimeMs, mtime);
       assert.equal(records.filePath, file);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -377,21 +381,25 @@ describe("M-2 records migration", () => {
       openRecords(file);
       assert.deepEqual(fs.readFileSync(bakPath(file)), original);
       const migrated = JSON.parse(fs.readFileSync(file, "utf8"));
-      assert.equal(migrated.schemaVersion, 3);
+      assert.equal(migrated.schemaVersion, 4);
       assert.deepEqual(migrated.offers, {});
       assert.deepEqual(migrated.requests, {});
       assert.deepEqual(migrated.audit, []);
       assert.equal(JSON.parse(fs.readFileSync(`${file}.pre-m3.bak`, "utf8")).schemaVersion, 2);
       const settled = fs.readFileSync(file);
       const settledM3 = fs.readFileSync(`${file}.pre-m3.bak`);
-      const mtime = stampFiles([file, bakPath(file), `${file}.pre-m3.bak`]);
+      const settledM4 = fs.readFileSync(`${file}.pre-m4.bak`);
+      assert.equal(JSON.parse(settledM4.toString("utf8")).schemaVersion, 3);
+      const mtime = stampFiles([file, bakPath(file), `${file}.pre-m3.bak`, `${file}.pre-m4.bak`]);
       openRecords(file);
       assert.deepEqual(fs.readFileSync(file), settled);
       assert.deepEqual(fs.readFileSync(bakPath(file)), original);
       assert.deepEqual(fs.readFileSync(`${file}.pre-m3.bak`), settledM3);
+      assert.deepEqual(fs.readFileSync(`${file}.pre-m4.bak`), settledM4);
       assert.equal(fs.statSync(file).mtimeMs, mtime);
       assert.equal(fs.statSync(bakPath(file)).mtimeMs, mtime);
       assert.equal(fs.statSync(`${file}.pre-m3.bak`).mtimeMs, mtime);
+      assert.equal(fs.statSync(`${file}.pre-m4.bak`).mtimeMs, mtime);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -406,7 +414,7 @@ describe("M-2 records migration", () => {
       fs.writeFileSync(bakPath(file), "sentinel-bak", { mode: 0o600 });
       openRecords(file);
       assert.equal(fs.readFileSync(bakPath(file), "utf8"), "sentinel-bak");
-      assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).schemaVersion, 3);
+      assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).schemaVersion, 4);
       assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")).requests, {});
       assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")).audit, [{ event: "old" }]);
     } finally {
@@ -438,22 +446,26 @@ describe("M-2 records migration", () => {
       assert.equal(mode(bak), 0o600);
       assert.equal(fs.existsSync(bakPath(file)), false);
       const migrated = JSON.parse(fs.readFileSync(file, "utf8"));
-      assert.equal(migrated.schemaVersion, 3);
+      assert.equal(migrated.schemaVersion, 4);
       assert.deepEqual(migrated.offers, offers);
       assert.equal(JSON.stringify(migrated.offers.a), JSON.stringify(offers.a));
       assert.deepEqual(migrated.requests, {});
       assert.equal(migrated.future.keep, true);
       assert.deepEqual(migrated.audit, [{ event: "x" }]);
       const settled = fs.readFileSync(file);
-      const mtime = stampFiles([file, bak]);
+      const settledM4 = fs.readFileSync(`${file}.pre-m4.bak`);
+      assert.equal(JSON.parse(settledM4.toString("utf8")).schemaVersion, 3);
+      const mtime = stampFiles([file, bak, `${file}.pre-m4.bak`]);
       records.view((data) => {
-        assert.equal(data.schemaVersion, 3);
+        assert.equal(data.schemaVersion, 4);
         data.offers.a.qty = 9;
       });
       assert.deepEqual(fs.readFileSync(file), settled);
       assert.deepEqual(fs.readFileSync(bak), Buffer.from(body));
+      assert.deepEqual(fs.readFileSync(`${file}.pre-m4.bak`), settledM4);
       assert.equal(fs.statSync(file).mtimeMs, mtime);
       assert.equal(fs.statSync(bak).mtimeMs, mtime);
+      assert.equal(fs.statSync(`${file}.pre-m4.bak`).mtimeMs, mtime);
       openRecords(file).view((data) => {
         assert.equal(data.offers.a.qty, 1);
       });
