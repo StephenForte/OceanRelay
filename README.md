@@ -19,6 +19,7 @@ Set these on the server. Do not commit the values.
 | `RATE_NINJA_BASE_URL` | no | Defaults to `https://rateninja.co`. |
 | `OCEANRELAY_STORE_PATH` | no | Encrypted token store. Defaults to `data/oceanrelay-store.json`. On Render, point this at a persistent disk because the service filesystem is ephemeral. |
 | `OCEANRELAY_RECORDS_PATH` | no | Offers and the audit log. Defaults to `data/oceanrelay-records.json`. Separate from the token store. On Render, point this at the same persistent disk. |
+| `OCEANRELAY_OPERATOR_SUBS` | no | Comma-separated Rate Ninja user ids allowed to open operator screens. `/config` shows only the count. |
 
 `GET /config` reports which of these are missing or invalid. It does not return secret values.
 
