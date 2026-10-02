@@ -375,6 +375,32 @@ The home page shows the signed-in user their Rate Ninja `sub`.
 least 4.5:1 contrast on white. Each row shows one quantity line: "N of M containers
 available in OceanRelay — Seller's claim".
 
+### D-22 — Pending OAuth rows in the token store are bounded (2026-10-02, F-15)
+
+Before the Rate Ninja redirect, `POST /connect` saves one pending row (`state`, an
+encrypted PKCE verifier, `createdAt`) per session. Any anonymous visitor can do that,
+because the CSRF token comes from the public home page.
+
+Before this decision, a row was removed only when its own callback took it, and
+`PENDING_TTL_MS` (10 minutes) was checked only at take. Measured on `main` at `d1ba1ad`:
+300 anonymous connects left 300 rows and grew the token store from 0 to 62,430 bytes.
+A callback with no matching row also rewrote the file.
+
+**Rules:**
+- `savePending` first drops every row older than `PENDING_TTL_MS`. Those rows could
+  never be taken anyway.
+- Pending rows are capped at **1,000**, about 210 KB. Saving past the cap evicts the
+  oldest rows by `createdAt`.
+- `takePending` writes the file only when it actually removed a row.
+- **The format does not change:** same keys, same row shape, same encryption.
+  Connections are never touched by pruning, and an existing file loads as before.
+
+**Trade-off, accepted for the pilot.** An attacker sending more than 1,000 connects
+inside one user's authorize round trip (seconds) can evict that user's pending row. The
+user then sees `invalid_state` and clicks Connect again. The alternative, refusing new
+rows when full, would let the same attacker block every sign-in for 10 minutes.
+Per-client rate limiting is out of scope; revisit if it is ever seen.
+
 ## Interface contracts
 
 A contract is the surface other tasks build on. The task named as owner publishes it; later
