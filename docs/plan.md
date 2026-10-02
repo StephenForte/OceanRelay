@@ -845,6 +845,10 @@ This section holds what previously lived only in the planning conversation. It i
 - **Text probes collide with navigation.** The text "Your offer" also matches the nav
   link "Your offers"; match on markup (for example `class="yours"`) instead.
 - **Bugbot does not run on draft PRs, and did not re-run after a force-push on #26** (comment `bugbot run` to trigger it). Mark the PR ready (`gh pr ready <n>`) before reviewing, and wait for its check. On #26, "no Bugbot comments" meant it had never run, and its first run found a blocking defect.
+- **The Security & Vulnerability Scans workflow (Semgrep and Trivy, added 2026-10-02 in #35) runs only on `pull_request` opened, synchronize or reopened.**
+  - Marking a PR ready does not start it.
+  - A PR opened before the workflow existed shows no scans until its next push.
+  - On #36 this looked like the scans were hanging. They had never started.
 - **Check bot comments on every PR before calling it done.** Cursor Bugbot runs on each
   PR. It was a false positive on #10 (it claimed URL path decoding) and a real bug on #21
   (F-11). Verify against the reviewed SHA, and record which of the two it was.
