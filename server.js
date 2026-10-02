@@ -12,8 +12,9 @@ const connectRoutes = require("./lib/routes/connect");
 const offerRoutes = require("./lib/routes/offers");
 const marketRoutes = require("./lib/routes/market");
 const requestRoutes = require("./lib/routes/requests");
+const operatorRoutes = require("./lib/routes/operator");
 
-const areas = [systemRoutes, connectRoutes, offerRoutes, marketRoutes, requestRoutes];
+const areas = [systemRoutes, connectRoutes, offerRoutes, marketRoutes, requestRoutes, operatorRoutes];
 
 const accessTokens = new Map();
 const refreshInflight = new Map();
@@ -193,8 +194,14 @@ function createServer({ config, store, records = null, fetchImpl = globalThis.fe
     if (!session || !identity) {
       if (session && connection) {
         const secrets = store.connectionSecrets(session.sid);
+        const profile = connection.profile;
         store.deleteConnection(session.sid);
         forgetAccessToken(session.sid);
+        activeRecords.appendAudit("auth.dropped", profile && typeof profile === "object" ? {
+          sub: profile.sub,
+          companyId: profile.companyId,
+          role: "user",
+        } : null, { reason: "identity_unusable" });
         // Synchronous gate (C-1). Revoke starts here and is not awaited.
         // Errors are swallowed so a failed revoke cannot reject the process.
         const token = secrets && secrets.refreshToken;

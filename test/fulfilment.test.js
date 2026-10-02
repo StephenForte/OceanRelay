@@ -762,7 +762,7 @@ describe("fulfilment screens", () => {
       assert.equal(records.availableQuantity(offer), 10);
 
       const market = await pageOf(base, buyer.cookie, "/market");
-      assert.match(itemHtml(market.html, "Cancel Lane"), /10 of 10 available in OceanRelay/);
+      assert.match(itemHtml(market.html, "Cancel Lane"), /10 of 10 containers available in OceanRelay — Seller&#39;s claim/);
       const detail = await pageOf(base, buyer.cookie, `/market/${offer.id}`);
       assert.match(detail.html, /10 of 10 containers available in OceanRelay/);
       assert.match(detail.html, /<dt>Listed quantity<\/dt>/);
@@ -828,10 +828,10 @@ describe("fulfilment screens", () => {
       assert.ok(filtered.html.indexOf("Open Lane") < filtered.html.indexOf("Taken Lane"));
       assert.match(itemHtml(filtered.html, "Taken Lane"), /^ class="taken"/);
       assert.match(itemHtml(filtered.html, "Taken Lane"), /Fully taken/);
-      assert.match(itemHtml(filtered.html, "Taken Lane"), /0 of 1 available in OceanRelay/);
+      assert.match(itemHtml(filtered.html, "Taken Lane"), /0 of 1 container available in OceanRelay — Seller&#39;s claim/);
       assert.match(itemHtml(filtered.html, "Taken Lane"), new RegExp(`href="/market/${taken.id}"`));
       assert.equal(itemHtml(filtered.html, "Open Lane").startsWith(" class=\"taken\""), false);
-      assert.match(itemHtml(filtered.html, "Open Lane"), /4 of 4 available in OceanRelay/);
+      assert.match(itemHtml(filtered.html, "Open Lane"), /4 of 4 containers available in OceanRelay — Seller&#39;s claim/);
       const all = await pageOf(base, seller.cookie, "/market");
       assert.ok(all.html.indexOf("Open Lane") < all.html.indexOf("Taken Lane"));
       assert.ok(all.html.indexOf("Open Lane") < all.html.indexOf("Other Port"));

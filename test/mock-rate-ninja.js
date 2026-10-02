@@ -1,13 +1,14 @@
 const http = require("node:http");
 const crypto = require("node:crypto");
 
-function createMockRateNinja({ clientId, clientSecret, userinfo, rates, sailings } = {}) {
+function createMockRateNinja({ clientId, clientSecret, userinfo, rates, sailings, accessTtl } = {}) {
   const codes = new Map();
   const refreshTokens = new Map();
   const calls = [];
   // T2 partner reads. `calls` stays a method+path string list for existing tests.
   const requests = [];
   const accessTokens = new Set();
+  const issued = [];
   const rateRows = Array.isArray(rates) ? rates : [];
   const sailingRows = Array.isArray(sailings) ? sailings : [];
   let nextPartnerFault = null;
@@ -165,10 +166,11 @@ function createMockRateNinja({ clientId, clientSecret, userinfo, rates, sailings
     const refresh = `refresh-${crypto.randomBytes(8).toString("base64url")}`;
     accessTokens.add(access);
     refreshTokens.set(refresh, true);
+    issued.push({ access_token: access, refresh_token: refresh });
     return {
       access_token: access,
       token_type: "Bearer",
-      expires_in: 600,
+      expires_in: Number.isFinite(accessTtl) && accessTtl >= 0 ? accessTtl : 600,
       refresh_token: refresh,
       scope: "profile:read rates:read sailings:read",
     };
@@ -214,6 +216,7 @@ function createMockRateNinja({ clientId, clientSecret, userinfo, rates, sailings
     calls,
     refreshTokens,
     requests,
+    issued,
     listen() {
       return new Promise((resolve) => {
         server.listen(0, "127.0.0.1", () => resolve(server.address().port));

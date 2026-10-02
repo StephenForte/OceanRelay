@@ -580,7 +580,7 @@ describe("marketplace", () => {
         carrier: "CMA",
         rate20D: 100,
         rate40HC: 0,
-        rateExpirationDate: "2026-10-01",
+        rateExpirationDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
       }),
       rateRow("rate-later", {
         originPort: "Hong Kong",
@@ -725,5 +725,56 @@ describe("marketplace", () => {
       assert.match(quantityHtml, /href="#quantity"/);
       assert.equal(quantityHtml.includes('href="#baseMinor"'), false);
     });
+  });
+});
+
+describe("fully taken marketplace rows", () => {
+  it("greys the whole row and shows one merged quantity line", () => {
+    const { buyerView } = require("../lib/offer-domain");
+    const { renderMarket } = require("../lib/views/market");
+    const terms = {
+      origin: "CNSHA",
+      destination: "USLAX",
+      equipment: "40HC",
+      quantity: 10,
+      unit: "container",
+      sailingStart: "2026-12-20",
+      sailingEnd: "2026-12-21",
+      validityDeadline: "2099-12-31",
+      currency: "USD",
+      buyerMinor: 2000,
+      codeShareName: "Taken Lane",
+      operatingCarrier: "ABC",
+      serviceTerms: "CY/CY",
+      capacityStatus: "seller_asserted",
+    };
+    const view = buyerView(terms);
+    const html = renderMarket({
+      publishedCount: 2,
+      query: {},
+      results: [
+        { id: "open-id", available: 4, yours: false, view: { ...view, codeShareLine: "Open Lane, operated by ABC" } },
+        { id: "taken-id", available: 0, yours: false, view },
+      ],
+    });
+    assert.match(html, /body \{[^}]*color: #102a43/);
+    assert.match(html, /li\.taken, li\.taken a, li\.taken p \{ color: #6b7280; \}/);
+    assert.equal(html.includes("#334e68"), false);
+    assert.equal(html.includes("#245b8a"), false);
+    const rows = html.split("<li").slice(1);
+    assert.equal(rows.length, 2);
+    const taken = rows.find((row) => row.includes("taken-id"));
+    const open = rows.find((row) => row.includes("open-id"));
+    assert.match(taken, /^ class="taken"/);
+    assert.equal(open.startsWith(" class=\"taken\""), false);
+    for (const row of rows) {
+      const lines = row.match(/containers available in OceanRelay — Seller&#39;s claim/g) || [];
+      assert.equal(lines.length, 1);
+      assert.equal(row.includes("containers — Seller&#39;s claim"), false);
+    }
+    assert.match(taken, /Fully taken/);
+    assert.match(taken, /0 of 10 containers available in OceanRelay — Seller&#39;s claim/);
+    assert.match(open, /4 of 10 containers available in OceanRelay — Seller&#39;s claim/);
+    assert.equal(html.includes("Listed quantity"), false);
   });
 });
