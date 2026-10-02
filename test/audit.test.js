@@ -473,30 +473,31 @@ describe("authentication audit", () => {
     }
   });
 
-  it("records auth.refused with the reason code and no token", async () => {
-    const dir = tempDir();
-    const mock = createMockRateNinja({ clientId: CLIENT_ID, clientSecret: CLIENT_SECRET });
-    const port = await mock.listen();
-    const app = await startAuditedApp({
+  it("writes auth.refused only after a code exchange, with the reason and no token", async () => {
+    const denied = tempDir();
+    const denyMock = createMockRateNinja({ clientId: CLIENT_ID, clientSecret: CLIENT_SECRET });
+    const denyPort = await denyMock.listen();
+    const denyApp = await startAuditedApp({
       RATE_NINJA_CLIENT_ID: CLIENT_ID,
       RATE_NINJA_CLIENT_SECRET: CLIENT_SECRET,
       SESSION_SECRET,
       TOKEN_ENCRYPTION_KEY: ENCRYPTION_KEY,
-      RATE_NINJA_BASE_URL: `http://127.0.0.1:${port}`,
+      RATE_NINJA_BASE_URL: `http://127.0.0.1:${denyPort}`,
       OCEANRELAY_REDIRECT_URI: "http://127.0.0.1:9/oauth/callback",
-    }, dir);
+    }, denied);
     try {
-      const home = await fetch(app.base);
+      const before = fs.readFileSync(denyApp.recordsPath);
+      const home = await fetch(denyApp.base);
       const cookie = cookieHeader(home);
       const csrf = (await home.text()).match(/name="csrf_token" value="([^"]+)"/)[1];
-      const connect = await fetch(`${app.base}/connect`, {
+      const connect = await fetch(`${denyApp.base}/connect`, {
         method: "POST",
         redirect: "manual",
         headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({ csrf_token: csrf }),
       });
       const authorize = new URL(connect.headers.get("location"));
-      const decision = await fetch(`http://127.0.0.1:${port}/oauth/decision`, {
+      const decision = await fetch(`http://127.0.0.1:${denyPort}/oauth/decision`, {
         method: "POST",
         redirect: "manual",
         headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -509,17 +510,85 @@ describe("authentication audit", () => {
       });
       const callback = await fetch(decision.headers.get("location"), { headers: { cookie }, redirect: "manual" });
       assert.match(callback.headers.get("location"), /only_contract_owner/);
+      assert.deepEqual(fs.readFileSync(denyApp.recordsPath), before);
+      assert.equal(readAudit(denyApp.recordsPath).length, 0);
+    } finally {
+      await denyApp.close();
+      await denyMock.close();
+      fs.rmSync(denied, { recursive: true, force: true });
+    }
+
+    const dir = tempDir();
+    const mock = createMockRateNinja({
+      clientId: CLIENT_ID,
+      clientSecret: CLIENT_SECRET,
+      userinfo: { profile: { companyType: "Freight Forwarder/Customer" } },
+    });
+    const port = await mock.listen();
+    const app = await startAuditedApp({
+      RATE_NINJA_CLIENT_ID: CLIENT_ID,
+      RATE_NINJA_CLIENT_SECRET: CLIENT_SECRET,
+      SESSION_SECRET,
+      TOKEN_ENCRYPTION_KEY: ENCRYPTION_KEY,
+      RATE_NINJA_BASE_URL: `http://127.0.0.1:${port}`,
+      OCEANRELAY_REDIRECT_URI: "http://127.0.0.1:9/oauth/callback",
+    }, dir);
+    try {
+      const connected = await connectOnce(app, mock);
+      assert.equal(connected.result, "only_contract_owner");
       const entry = readAudit(app.recordsPath).at(-1);
       assert.equal(entry.event, "auth.refused");
-      assert.equal(entry.actor, null);
+      assertActor(entry, { sub: "user-owner", companyId: "kings", role: "user" });
       assert.deepEqual(entry.subject, {});
       assert.deepEqual(entry.detail, { reason: "only_contract_owner" });
       const raw = fs.readFileSync(app.recordsPath, "utf8");
-      assert.equal(raw.includes(authorize.searchParams.get("state")), false);
+      for (const issued of mock.issued) {
+        assert.equal(raw.includes(issued.access_token), false);
+        assert.equal(raw.includes(issued.refresh_token), false);
+      }
+      assert.equal(raw.includes(connected.code), false);
       assert.equal(raw.includes(CLIENT_SECRET), false);
     } finally {
       await app.close();
       await mock.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("leaves the records file unchanged across 150 anonymous callback hits", async () => {
+    const dir = tempDir();
+    const app = await startAuditedApp({
+      RATE_NINJA_CLIENT_ID: CLIENT_ID,
+      RATE_NINJA_CLIENT_SECRET: CLIENT_SECRET,
+      SESSION_SECRET,
+      TOKEN_ENCRYPTION_KEY: ENCRYPTION_KEY,
+      RATE_NINJA_BASE_URL: "http://127.0.0.1:9",
+      OCEANRELAY_REDIRECT_URI: "http://127.0.0.1:9/oauth/callback",
+    }, dir);
+    try {
+      const before = fs.readFileSync(app.recordsPath);
+      const beforeLength = readAudit(app.recordsPath).length;
+      const anon = sessionCookie("sid-anon", "csrf-anon");
+      for (let i = 0; i < 50; i += 1) {
+        const bare = await fetch(`${app.base}/oauth/callback`, { redirect: "manual" });
+        const denied = await fetch(`${app.base}/oauth/callback?error=access_denied`, { redirect: "manual" });
+        const bogus = await fetch(`${app.base}/oauth/callback?state=x&code=y`, {
+          headers: { cookie: anon },
+          redirect: "manual",
+        });
+        assert.equal(bare.status, 302);
+        assert.match(bare.headers.get("location"), /invalid_state/);
+        assert.equal(denied.status, 302);
+        assert.match(denied.headers.get("location"), /access_denied/);
+        assert.equal(bogus.status, 302);
+        assert.match(bogus.headers.get("location"), /invalid_state/);
+      }
+      const after = fs.readFileSync(app.recordsPath);
+      assert.equal(after.length, before.length);
+      assert.deepEqual(after, before);
+      assert.equal(readAudit(app.recordsPath).length, beforeLength);
+    } finally {
+      await app.close();
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
