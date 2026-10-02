@@ -38,14 +38,9 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Cache Trivy DB
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/.cache/trivy
-          key: ${{ runner.os }}-trivy-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-trivy-
-
+      # trivy-action caches $GITHUB_WORKSPACE/.cache/trivy and sets
+      # TRIVY_CACHE_DIR there. A separate cache of ~/.cache/trivy never
+      # reaches the directory the scan reads.
       - name: Run Trivy Filesystem Scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
