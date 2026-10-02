@@ -118,7 +118,7 @@ Planned split, subject to revision after Phase 3 lands:
 | T9 | **merged `e0f3590` 2026-09-30, PR #21 at `8aaa060`** (review in §6). Prompt: `docs/prompts/T9-marketplace.md`. Marketplace search and filters (D-17, C-8), F-9 and F-10 from the T5 review, operator-reported usability fixes (§7, 2026-09-29), buyer offer page (published, non-expired, current version via `buyerView`), and the buyer-view formatting fixes from the A-3 screenshot (§7), plus F-8 (rate chooser search and filters, §7 O-9) | Blocked on T5. New id; ids are never renumbered. |
 | T6 | Requests, accept/decline/counter, availability accounting (D-18, D-19, C-9, C-10, M-3) | **merged `b176cdb` 2026-09-30, PR #26 at `33eddef`**; A-4 (T6 scope) passed 2026-10-01 (round 1 `96c05d0` changes requested; review in §6) — `docs/prompts/T6-requests.md`. D-19 confirmed by the operator. | The concurrency task. D-3's synchronous-mutation rule is the core invariant; test with overlapping requests. |
 | T7 | Post-acceptance carrier statuses, mutual cancellation, disputes, seller decline on countered, marketplace availability (D-20, C-11, M-4, F-13) | **merged `6d11f17` 2026-10-01, PR #32 at `bfe1986`**. It was merged by the operator before the planner review, which then ran post-merge and found it correct (§6). One follow-up: F-14. Prompt: `docs/prompts/T7-fulfilment.md`. T8 is next. |
-| T8 | Audit log, operator screens and inconsistencies, operator carrier status, the `sub` on the home page, F-14 (D-21, C-12; no migration) | **round 2 dispatched 2026-10-02**. PR #36: round 1 `8c9fe59` had changes requested, because unauthenticated callback hits wrote audit entries (D-21 amended; review in §6). Prompt: `docs/prompts/T8-audit-operator.md`. Model: strongest. After merge, the operator sets `OCEANRELAY_OPERATOR_SUBS`, then A-4 is re-run in full. |
+| T8 | Audit log, operator screens and inconsistencies, operator carrier status, the `sub` on the home page, F-14 (D-21, C-12; no migration) | **approved 2026-10-02, PR #36 at `5230b83`**, awaiting merge. Round 1 `8c9fe59` had changes requested (review in §6). After merge, the operator sets `OCEANRELAY_OPERATOR_SUBS`, then A-4 is re-run in full. |
 | A-4 | Phase 4 acceptance with accounts O-4(a) and O-4(c) | **T6 scope passed 2026-10-01** (operator, Kings + `testbuyer`, all 7 steps; see §7). Re-run the post-acceptance steps after T7 and T8. |
 
 T5, T9 and T6 all touch the offer record; run them in sequence: T5 → T9 → T6.
@@ -639,6 +639,18 @@ The operator merged #32 by accident before the planner review. The review then r
 - So an anonymous client looping GET `/` → POST `/connect` grows the token store file without limit.
 - **Fix:** prune expired pending rows on `savePending`, and cap the total.
 - **Owner:** this needs `lib/store.js`, which has been off-limits since T1 (the deployed token format). Pruning does not change the format. A small task (T10) when the operator chooses.
+
+**T8 round 2, `5230b83`, approved 2026-10-02:**
+- **Base and scope:** merge-base `726209d` = `main`. Round 2 removes the 6 pre-exchange `auth.refused` calls from `lib/routes/connect.js` and rewrites the tests in `test/audit.test.js`.
+- **Gate:** 195 pass, 0 fail, 0 skip.
+- **Probe:** 600 anonymous callback hits leave the audit at 0 entries and the file at 56 bytes (round 1: 600 entries, 100,255 bytes).
+- **Re-run on round 2:** the operator gate, the 8-secret scan and the operator no-write checks all hold.
+- **The rewritten test is stronger:** a deny now writes nothing, and a post-exchange refusal is still audited with its actor.
+- **Scans:**
+  - Semgrep ran 2,944 rules with 0 findings.
+  - Trivy is clean.
+  - Bugbot passed with no findings.
+  - All three ran only on the round-2 push (see §8).
 
 ---
 
