@@ -118,7 +118,7 @@ Planned split, subject to revision after Phase 3 lands:
 | T9 | **merged `e0f3590` 2026-09-30, PR #21 at `8aaa060`** (review in §6). Prompt: `docs/prompts/T9-marketplace.md`. Marketplace search and filters (D-17, C-8), F-9 and F-10 from the T5 review, operator-reported usability fixes (§7, 2026-09-29), buyer offer page (published, non-expired, current version via `buyerView`), and the buyer-view formatting fixes from the A-3 screenshot (§7), plus F-8 (rate chooser search and filters, §7 O-9) | Blocked on T5. New id; ids are never renumbered. |
 | T6 | Requests, accept/decline/counter, availability accounting (D-18, D-19, C-9, C-10, M-3) | **merged `b176cdb` 2026-09-30, PR #26 at `33eddef`**; A-4 (T6 scope) passed 2026-10-01 (round 1 `96c05d0` changes requested; review in §6) — `docs/prompts/T6-requests.md`. D-19 confirmed by the operator. | The concurrency task. D-3's synchronous-mutation rule is the core invariant; test with overlapping requests. |
 | T7 | Post-acceptance carrier statuses, mutual cancellation, disputes, seller decline on countered, marketplace availability (D-20, C-11, M-4, F-13) | **merged `6d11f17` 2026-10-01, PR #32 at `bfe1986`**. It was merged by the operator before the planner review, which then ran post-merge and found it correct (§6). One follow-up: F-14. Prompt: `docs/prompts/T7-fulfilment.md`. T8 is next. |
-| T8 | Audit log, operator screens and inconsistencies, operator carrier status, the `sub` on the home page, F-14 (D-21, C-12; no migration) | **ready 2026-10-01**: `docs/prompts/T8-audit-operator.md`. Model: strongest. Run now. After merge, the operator sets `OCEANRELAY_OPERATOR_SUBS` in Render, then A-4 is re-run in full. |
+| T8 | Audit log, operator screens and inconsistencies, operator carrier status, the `sub` on the home page, F-14 (D-21, C-12; no migration) | **round 2 dispatched 2026-10-02**. PR #36: round 1 `8c9fe59` had changes requested, because unauthenticated callback hits wrote audit entries (D-21 amended; review in §6). Prompt: `docs/prompts/T8-audit-operator.md`. Model: strongest. After merge, the operator sets `OCEANRELAY_OPERATOR_SUBS`, then A-4 is re-run in full. |
 | A-4 | Phase 4 acceptance with accounts O-4(a) and O-4(c) | **T6 scope passed 2026-10-01** (operator, Kings + `testbuyer`, all 7 steps; see §7). Re-run the post-acceptance steps after T7 and T8. |
 
 T5, T9 and T6 all touch the offer record; run them in sequence: T5 → T9 → T6.
@@ -612,6 +612,33 @@ The operator merged #32 by accident before the planner review. The review then r
   - use a real grey for the whole taken row, still at or above 4.5:1 contrast on white (for example `#6b7280`, 4.83:1; the planner's first suggestion, `#627d98`, measures 4.28:1 and fails);
   - merge the two quantity lines into one: "N of M containers available in OceanRelay — Seller's claim".
 - **Scope:** `lib/views/market.js` plus a test. **Folded into T8 (operator decision, 2026-10-01).**
+
+### T8 — PR #36, first round `8c9fe59`: changes requested 2026-10-02
+
+- **Base and scope:**
+  - Branched from `373c1b6`. `main` has since moved to `510c132`, through #35 and #37, which add `.github/workflows/security-scans.yml` (Semgrep plus Trivy). Neither PR is in the plan. Both are operator-authored and touch only that file, so there is no conflict.
+  - Docs PR #34 (D-21, C-12, the T8 prompt) was **still open** when the worker ran. The worker read C-12 from the planning branch.
+  - The 17 changed files are all owned or shared-additive. `test/connect.test.js` and `test/records.test.js` are unmodified.
+- **Gate** (scratch clone): 194 pass, 0 fail, 0 skip. This matches the handoff.
+- **Blocking, a planner design gap in D-21:**
+  - `lib/routes/connect.js` writes `auth.refused` on callback failures that need no account: no session (`config_incomplete`), `error=access_denied`, and a bad `state`.
+  - Measured: 600 unauthenticated GETs wrote 600 entries and grew the records file from 56 bytes to 100,255 bytes.
+  - Every write rewrites the whole file, so the I/O grows with the square of the entry count. At about 165 bytes per entry, 100k requests would leave a 16 MB file and roughly 800 GB written in total.
+  - **Fix shown to work** in the scratch clone: keep only the post-exchange identity refusal. The probe then wrote 0 entries.
+  - One worker test ("records auth.refused with the reason code and no token") encodes the old rule and must change.
+  - D-21 is amended.
+- **Verified clean** (probes, temp files deleted):
+  - **Gate leaks nothing:** the `/operator` 404, signed out and as a non-operator, is byte-identical to `/no-such-page` in body and headers.
+  - **No secrets:** a real OAuth flow through connect, `/operator` and disconnect leaves none of 8 secret values in the records file (the client secret, the session secret, the code, the state, the CSRF token, the session cookie, and the access and refresh tokens).
+  - **Detail can't carry text:** `detail` is whitelisted to numbers, `[a-z_]` codes and a fixed reason list, so free text cannot reach it by construction.
+  - **Operator reads never write:** four operator reads leave the file's bytes and mtime unchanged.
+  - **F-14:** the taken row uses `#6b7280` for text, link and lines, and each row has one merged quantity line.
+
+**F-15 (pre-existing since Phase 2, not T8): pending OAuth rows in the token store are unbounded.**
+- `POST /connect` (CSRF from an anonymous home-page visit) saves one pending row per session. `lib/store.js` deletes a row only when its own callback takes it, and `PENDING_TTL_MS` is checked only on take.
+- So an anonymous client looping GET `/` → POST `/connect` grows the token store file without limit.
+- **Fix:** prune expired pending rows on `savePending`, and cap the total.
+- **Owner:** this needs `lib/store.js`, which has been off-limits since T1 (the deployed token format). Pruning does not change the format. A small task (T10) when the operator chooses.
 
 ---
 
