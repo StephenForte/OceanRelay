@@ -322,6 +322,17 @@ needed: the schema stays at 4.
   failed refresh or a revoked grant) are not records changes. Each one is appended in a
   transact of its own.
 
+**Amended 2026-10-02 (T8 review; planner error).** Nobody may be able to grow the log
+without first authenticating at Rate Ninja.
+- `auth.refused` is written only after a **successful code exchange**, when Rate Ninja
+  has authenticated a real user whom OceanRelay then refuses (for example
+  `only_contract_owner` or `identity_unavailable`).
+- Callback failures before that point write nothing: no session, bad `state`, an
+  `error=` redirect, or a failed exchange. Anyone can trigger them without an account.
+- Measured on T8's first round: 600 unauthenticated GETs of `/oauth/callback` wrote 600
+  entries and grew the file from 56 bytes to 100 KB.
+- Every other event already requires a stored connection or an identity.
+
 **Never in the log:**
 - passwords;
 - access or refresh tokens, authorization codes, PKCE verifiers, OAuth `state`;
