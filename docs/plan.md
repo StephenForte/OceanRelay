@@ -118,8 +118,9 @@ Planned split, subject to revision after Phase 3 lands:
 | T9 | **merged `e0f3590` 2026-09-30, PR #21 at `8aaa060`** (review in §6). Prompt: `docs/prompts/T9-marketplace.md`. Marketplace search and filters (D-17, C-8), F-9 and F-10 from the T5 review, operator-reported usability fixes (§7, 2026-09-29), buyer offer page (published, non-expired, current version via `buyerView`), and the buyer-view formatting fixes from the A-3 screenshot (§7), plus F-8 (rate chooser search and filters, §7 O-9) | Blocked on T5. New id; ids are never renumbered. |
 | T6 | Requests, accept/decline/counter, availability accounting (D-18, D-19, C-9, C-10, M-3) | **merged `b176cdb` 2026-09-30, PR #26 at `33eddef`**; A-4 (T6 scope) passed 2026-10-01 (round 1 `96c05d0` changes requested; review in §6) — `docs/prompts/T6-requests.md`. D-19 confirmed by the operator. | The concurrency task. D-3's synchronous-mutation rule is the core invariant; test with overlapping requests. |
 | T7 | Post-acceptance carrier statuses, mutual cancellation, disputes, seller decline on countered, marketplace availability (D-20, C-11, M-4, F-13) | **merged `6d11f17` 2026-10-01, PR #32 at `bfe1986`**. It was merged by the operator before the planner review, which then ran post-merge and found it correct (§6). One follow-up: F-14. Prompt: `docs/prompts/T7-fulfilment.md`. T8 is next. |
-| T8 | Audit log, operator screens and inconsistencies, operator carrier status, the `sub` on the home page, F-14 (D-21, C-12; no migration) | **approved 2026-10-02, PR #36 at `5230b83`**, awaiting merge. Round 1 `8c9fe59` had changes requested (review in §6). After merge, the operator sets `OCEANRELAY_OPERATOR_SUBS`, then A-4 is re-run in full. |
-| A-4 | Phase 4 acceptance with accounts O-4(a) and O-4(c) | **T6 scope passed 2026-10-01** (operator, Kings + `testbuyer`, all 7 steps; see §7). Re-run the post-acceptance steps after T7 and T8. |
+| T8 | Audit log, operator screens and inconsistencies, operator carrier status, the `sub` on the home page, F-14 (D-21, C-12; no migration) | **merged 2026-10-02, PR #36 at `5230b83`** (review in §6). `OCEANRELAY_OPERATOR_SUBS` is set; `/config` shows `operatorCount: 1`. |
+| T10 | F-15: bound pending OAuth rows in the token store (D-22) | **ready 2026-10-02**: `docs/prompts/T10-pending-bound.md`. Model: mid (small, but on the deployed token format). Run now; Phase 5 planning follows. |
+| A-4 | Phase 4 acceptance with accounts O-4(a) and O-4(c) | **Phase 4 fully accepted 2026-10-02** (operator, deployed): every step passed, including post-acceptance statuses, the refuse-then-agree cancellation, the grey fully taken row, and the operator screens and gate (§7). The T6-scope run was on 2026-10-01. |
 
 T5, T9 and T6 all touch the offer record; run them in sequence: T5 → T9 → T6.
 
@@ -834,6 +835,18 @@ Before this, Render's Shell showed `oceanrelay-records.json.pre-m3.bak` and `"sc
   - The list must compute availability without writing the file.
 - **T7 owns it** because T7's cancellation must return quantity to availability, so the same display is under test there.
 - **Open operator question:** should an offer with 0 available stay on the marketplace, marked as fully taken? The default in T7's prompt is yes, shown and marked, with no request form.
+
+### 2026-10-02 — A-4 in full (operator, deployed): Phase 4 accepted
+
+The operator reported every step passed:
+- the steps from the 2026-10-01 run;
+- carrier pending, then carrier confirmed ("recorded by");
+- a cancellation proposed, refused (the dispute sentence shown), proposed again, and agreed, after which the quantity returned;
+- the fully taken row grey and sorted last;
+- `/operator`, a request page, an operator status (the party page read "recorded by the OceanRelay operator"), and `/operator/audit`;
+- `/operator` as `testbuyer` showed only `{"error":"not found"}`.
+
+`/config` showed `"operatorCount": 1` and no id. The operator chose to do F-15 (T10) before Phase 5 planning.
 
 ---
 
