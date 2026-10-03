@@ -119,7 +119,7 @@ Planned split, subject to revision after Phase 3 lands:
 | T6 | Requests, accept/decline/counter, availability accounting (D-18, D-19, C-9, C-10, M-3) | **merged `b176cdb` 2026-09-30, PR #26 at `33eddef`**; A-4 (T6 scope) passed 2026-10-01 (round 1 `96c05d0` changes requested; review in §6) — `docs/prompts/T6-requests.md`. D-19 confirmed by the operator. | The concurrency task. D-3's synchronous-mutation rule is the core invariant; test with overlapping requests. |
 | T7 | Post-acceptance carrier statuses, mutual cancellation, disputes, seller decline on countered, marketplace availability (D-20, C-11, M-4, F-13) | **merged `6d11f17` 2026-10-01, PR #32 at `bfe1986`**. It was merged by the operator before the planner review, which then ran post-merge and found it correct (§6). One follow-up: F-14. Prompt: `docs/prompts/T7-fulfilment.md`. T8 is next. |
 | T8 | Audit log, operator screens and inconsistencies, operator carrier status, the `sub` on the home page, F-14 (D-21, C-12; no migration) | **merged 2026-10-02, PR #36 at `5230b83`** (review in §6). `OCEANRELAY_OPERATOR_SUBS` is set; `/config` shows `operatorCount: 1`. |
-| T10 | F-15: bound pending OAuth rows in the token store (D-22) | **ready 2026-10-02**: `docs/prompts/T10-pending-bound.md`. Model: mid (small, but on the deployed token format). Run now; Phase 5 planning follows. |
+| T10 | F-15: bound pending OAuth rows in the token store (D-22) | **approved 2026-10-02, PR #40 at `b13ab84`**, awaiting merge. F-15 closes on merge. Planner verified it: 1,100 anonymous connects leave 1,000 rows (208 KB), and a store with 2 live connections plus 1,200 pending rows keeps `connections` byte-identical and decryptable. |
 | A-4 | Phase 4 acceptance with accounts O-4(a) and O-4(c) | **Phase 4 fully accepted 2026-10-02** (operator, deployed): every step passed, including post-acceptance statuses, the refuse-then-agree cancellation, the grey fully taken row, and the operator screens and gate (§7). The T6-scope run was on 2026-10-01. |
 
 T5, T9 and T6 all touch the offer record; run them in sequence: T5 → T9 → T6.
@@ -874,6 +874,7 @@ This section holds what previously lived only in the planning conversation. It i
   - Marking a PR ready does not start it.
   - A PR opened before the workflow existed shows no scans until its next push.
   - On #36 this looked like the scans were hanging. They had never started.
+- **Planner tooling:** on 2026-10-02 the Mac's `/usr/local/bin/python3` stopped running ("Bad CPU type", after an OS update). Use Node for scratch edits to the docs.
 - **Check bot comments on every PR before calling it done.** Cursor Bugbot runs on each
   PR. It was a false positive on #10 (it claimed URL path decoding) and a real bug on #21
   (F-11). Verify against the reviewed SHA, and record which of the two it was.
