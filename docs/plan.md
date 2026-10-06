@@ -125,7 +125,21 @@ Planned split, subject to revision after Phase 3 lands:
 
 T5, T9 and T6 all touch the offer record; run them in sequence: T5 → T9 → T6.
 
-### Phase 5 and 6 — not planned yet
+### Phase 5 — On-chain lifecycle record (planned 2026-10-06; D-24, D-25, C-14)
+
+Tasks, in order. Each runs after the previous one merges.
+
+| Id | Task | Owns | Model | Status |
+| --- | --- | --- | --- | --- |
+| T12 | OceanRelayLedger contract, Foundry tests, deploy script, EIP-712 test vectors, contracts CI (C-14) | `contracts/**`, `.github/workflows/contracts.yml` | strongest | **ready 2026-10-06**: `docs/prompts/T12-ledger-contract.md` |
+| O-10 | **The operator deploys** T12's contract to chain 852 with the owner key, records the address, transaction, block and runtime-code hash in `deployments/fortel2-sepolia.json` via a PR, and generates the relayer and registrar keys and funds the relayer | operator | — | after T12 |
+| T13 | Chain client: write RPC with the Access headers; relayer transaction signing (`@noble/*`); sequencer receipts; pending, retry and reconcile; startup checks (D-24). It must match T12's test vectors. | `lib/chain*.js` | strongest | after O-10 |
+| T14 | Wallet binding: the wallet-page script (D-25), the EIP-712 `Binding`, and the binding record and screens | — | strong | after T13 |
+| T15 | Publish, version, state, request, acceptance, status and cancellation recorded on chain, with pending, confirmed and failed shown in the UI | — | strongest | after T14 |
+| T16 | Operator reconciliation: compare the records with chain events and flag mismatches; a repair is an audited correction | — | strong | after T15 |
+| A-5 | Phase 5 acceptance on the deployed service | operator | — | after T16 |
+
+### Phase 5 inputs
 
 **Networks and endpoints** (from the operator, 2026-10-06; verified by the planner the same day):
 
