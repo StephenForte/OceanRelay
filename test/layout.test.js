@@ -64,9 +64,13 @@ function publish(records, seller, name) {
   return published.offer;
 }
 
-async function withApp(run, { subs = "" } = {}) {
+async function withApp(run, { subs = "", rates = null } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "oceanrelay-layout-"));
-  const mock = createMockRateNinja({ clientId: CLIENT_ID, clientSecret: CLIENT_SECRET });
+  const mock = createMockRateNinja({
+    clientId: CLIENT_ID,
+    clientSecret: CLIENT_SECRET,
+    ...(Array.isArray(rates) ? { rates } : {}),
+  });
   const port = await mock.listen();
   const origin = `http://127.0.0.1:${port}`;
   const recordsPath = path.join(dir, "records.json");
@@ -127,6 +131,8 @@ describe("stylesheet", () => {
       assert.match(css.headers.get("cache-control"), /max-age=31536000/);
       assert.equal(crypto.createHash("sha256").update(body).digest("hex"), stylesheetHash);
       assert.equal(body, stylesheet);
+      assert.equal(body.includes("@import"), false);
+      assert.equal(/url\(\s*['"]?https?:/i.test(body), false);
       const home = await fetch(base);
       const html = await home.text();
       assert.match(html, new RegExp(`href="${stylesheetHref().replace("?", "\\?")}"`));
@@ -240,5 +246,211 @@ describe("header escaping", () => {
       assert.equal(home.html.includes("<img"), false);
       assert.equal(home.html.includes(`class="company">${ESCAPED}`), true);
     });
+  });
+});
+
+function rateRow() {
+  return {
+    id: "rate-layout",
+    source: "base_contract",
+    allocationEvidence: false,
+    capacityQuantity: null,
+    carrier: "ABC",
+    contractOwner: "Marked",
+    ownerCompanyId: "mark-co",
+    originPort: "CNSHA",
+    destinationPort: "USLAX",
+    inlandDeliveryLocation: "",
+    commodityType: "FAK",
+    rate20D: 900,
+    rate40D: 0,
+    rate40HC: 1500,
+    currency: null,
+    rateEffectiveDate: "2026-09-01",
+    rateExpirationDate: "2099-12-31",
+    updatedAt: null,
+    notes: "private",
+  };
+}
+
+function assertChrome(html, { operator = false } = {}) {
+  assert.match(html, /<a class="skip" href="#content">Skip to content<\/a>/);
+  assert.match(html, /<nav class="nav" aria-label="Primary">/);
+  assert.match(html, /href="\/market"/);
+  assert.match(html, /Your offers/);
+  assert.match(html, /href="\/requests"/);
+  assert.match(html, new RegExp(`href="${stylesheetHref().replace(/[?]/g, "\\?")}"`));
+  assert.equal(html.includes("<style"), false);
+  assert.equal(html.includes("<script"), false);
+  assertNoRemote(html);
+  if (operator) assert.match(html, /href="\/operator"/);
+  else assert.equal(html.includes('href="/operator"'), false);
+}
+
+function assertNoRemote(html) {
+  assert.equal(html.includes("<style"), false);
+  assert.equal(html.includes("<script"), false);
+  assert.equal(html.includes("@import"), false);
+  assert.equal(/url\(\s*['"]?https?:/i.test(html), false);
+  assert.equal(/href=["']https?:/i.test(html), false);
+  assert.equal(/src=["']https?:/i.test(html), false);
+}
+
+async function postForm(base, cookie, target, fields) {
+  const response = await fetch(new URL(target, base), {
+    method: "POST",
+    redirect: "manual",
+    headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(fields),
+  });
+  return { response, html: await response.text() };
+}
+
+describe("signed-in pages", () => {
+  it("uses one stylesheet, the header, and the skip link on every page", async () => {
+    await withApp(async ({ base, store, records, mock }) => {
+      const marked = seedCompany(store, mock, "sid-mark", "csrf-mark", {
+        companyId: "mark-co",
+        sub: "user-mark",
+        companyName: MARKUP,
+        name: "Marked",
+      });
+      const other = seedCompany(store, mock, "sid-other", "csrf-other", OTHER);
+      const third = seedCompany(store, mock, "sid-third", "csrf-third", {
+        companyId: "third-co",
+        sub: "user-third",
+        companyName: "Third Co",
+      });
+      const offer = publish(records, {
+        companyId: "mark-co",
+        sub: "user-mark",
+        companyName: MARKUP,
+      }, "Layout Lane");
+      const created = records.createRequest(OTHER, offer.id, offer.currentVersion, 1, TODAY);
+      const countered = records.counterRequest({
+        companyId: "mark-co",
+        sub: "user-mark",
+        companyName: MARKUP,
+      }, created.request.id, {
+        quantity: 1,
+        unitBuyerMinor: 2100,
+        serviceTerms: `Terms${MARKUP}`,
+      }, TODAY);
+      assert.equal(countered.ok, true);
+      const hidden = records.createOffer(OTHER, {
+        source: "manual",
+        terms: manualTerms({ codeShareName: "Hidden Lane" }),
+        snapshot: null,
+        sourceRecordId: null,
+        overriddenFields: [],
+      });
+      const foreignOffer = publish(records, {
+        companyId: "third-co",
+        sub: "user-third",
+        companyName: "Third Co",
+      }, "Foreign Lane");
+      const foreignRequest = records.createRequest(OTHER, foreignOffer.id, foreignOffer.currentVersion, 1, TODAY);
+
+      const pages = [
+        "/",
+        "/market",
+        `/market/${offer.id}`,
+        "/offers",
+        "/offers/new",
+        "/offers/new?source=manual",
+        "/offers/new?source=rn_rate&rateId=rate-layout&equipment=40HC",
+        `/offers/${offer.id}`,
+        `/offers/${offer.id}/edit`,
+        "/requests",
+        `/requests/${created.request.id}`,
+        "/operator",
+        `/operator/requests/${created.request.id}`,
+        "/operator/audit",
+      ];
+      for (const target of pages) {
+        const page = await textOf(base, marked.cookie, target);
+        assert.equal(page.response.status, 200, target);
+        assertChrome(page.html, { operator: true });
+        assert.equal(page.html.includes(MARKUP), false, target);
+        assert.equal(page.html.includes("<img"), false, target);
+        assert.equal(page.html.includes(`class="company">${ESCAPED}`), true, target);
+      }
+      const detail = await textOf(base, marked.cookie, `/requests/${created.request.id}`);
+      const timelineStart = detail.html.indexOf('id="request-timeline"');
+      const timeline = detail.html.slice(timelineStart, detail.html.indexOf("</ol>", timelineStart));
+      assert.equal(timeline.includes(MARKUP), false);
+      assert.equal(timeline.includes(`Terms${ESCAPED}`), true);
+
+      const plain = seedCompany(store, mock, "sid-kings", "csrf-kings", KINGS);
+      for (const target of ["/", "/market", "/offers", "/requests"]) {
+        const page = await textOf(base, plain.cookie, target);
+        assert.equal(page.response.status, 200, target);
+        assertChrome(page.html, { operator: false });
+      }
+
+      const missingMarket = await textOf(base, marked.cookie, "/market/missing-offer");
+      const foreignMarket = await textOf(base, marked.cookie, `/market/${hidden.id}`);
+      const otherMarket = await textOf(base, other.cookie, "/market/missing-offer");
+      assert.equal(missingMarket.response.status, 404);
+      assert.equal(missingMarket.html, foreignMarket.html);
+      assert.equal(missingMarket.html, otherMarket.html);
+      assert.equal(missingMarket.html.includes(hidden.id), false);
+      assertChrome(missingMarket.html, { operator: false });
+      assert.equal(missingMarket.html.includes(`class="company"`), false);
+      const postMarket = await postForm(base, marked.cookie, "/market/missing-offer/requests", {
+        csrf_token: marked.csrf,
+        version: "1",
+        quantity: "1",
+      });
+      const postForeignMarket = await postForm(base, marked.cookie, `/market/${hidden.id}/requests`, {
+        csrf_token: marked.csrf,
+        version: "1",
+        quantity: "1",
+      });
+      assert.equal(postMarket.response.status, 404);
+      assert.equal(postMarket.html, missingMarket.html);
+      assert.equal(postForeignMarket.html, missingMarket.html);
+
+      const missingOffer = await textOf(base, marked.cookie, "/offers/missing-offer");
+      const foreignOfferPage = await textOf(base, marked.cookie, `/offers/${foreignOffer.id}`);
+      const otherOfferPage = await textOf(base, other.cookie, "/offers/missing-offer");
+      assert.equal(missingOffer.response.status, 404);
+      assert.equal(missingOffer.html, foreignOfferPage.html);
+      assert.equal(missingOffer.html, otherOfferPage.html);
+      assert.equal(missingOffer.html.includes(foreignOffer.id), false);
+      const postOffer = await postForm(base, marked.cookie, "/offers/missing-offer/state", {
+        csrf_token: marked.csrf,
+        to: "published",
+      });
+      const postForeignOffer = await postForm(base, marked.cookie, `/offers/${foreignOffer.id}/state`, {
+        csrf_token: marked.csrf,
+        to: "published",
+      });
+      assert.equal(postOffer.response.status, 404);
+      assert.equal(postOffer.html, missingOffer.html);
+      assert.equal(postForeignOffer.html, missingOffer.html);
+
+      const missingRequest = await textOf(base, marked.cookie, "/requests/missing-request");
+      const foreignRequestPage = await textOf(base, marked.cookie, `/requests/${foreignRequest.request.id}`);
+      const otherRequestPage = await textOf(base, other.cookie, "/requests/missing-request");
+      assert.equal(missingRequest.response.status, 404);
+      assert.equal(missingRequest.html, foreignRequestPage.html);
+      assert.equal(missingRequest.html, otherRequestPage.html);
+      assert.equal(missingRequest.html.includes(foreignRequest.request.id), false);
+      const postRequest = await postForm(base, marked.cookie, "/requests/missing-request/decline", {
+        csrf_token: marked.csrf,
+      });
+      const postForeignRequest = await postForm(base, marked.cookie, `/requests/${foreignRequest.request.id}/decline`, {
+        csrf_token: marked.csrf,
+      });
+      assert.equal(postRequest.response.status, 404);
+      assert.equal(postRequest.html, missingRequest.html);
+      assert.equal(postForeignRequest.html, missingRequest.html);
+
+      const signedOut = await textOf(base, "", "/");
+      assert.equal(signedOut.response.status, 200);
+      assertNoRemote(signedOut.html);
+      assert.equal(signedOut.html.includes("<nav"), false);
+    }, { subs: "user-mark", rates: [rateRow()] });
   });
 });
