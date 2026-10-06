@@ -722,6 +722,8 @@ JSON 404.
 
 Pages link it as `/assets/oceanrelay.css?v=<hash>`.
 
+**Amended 2026-10-06 (T11 review):** not-found HTML pages use a static signed-in nav with no `companyName`, no Disconnect `csrf` and no operator link, so their 404 bodies stay byte-identical across viewers.
+
 Later pages, Phase 5 included, are added through `renderLayout` and the shared
 component classes: card, pill, button, form row, table and banner. They are not added
 with their own markup scaffolding.
