@@ -757,11 +757,16 @@ describe("fully taken marketplace rows", () => {
         { id: "taken-id", available: 0, yours: false, view },
       ],
     });
-    assert.match(html, /body \{[^}]*color: #102a43/);
-    assert.match(html, /li\.taken, li\.taken a, li\.taken p \{ color: #6b7280; \}/);
+    const { stylesheet } = require("../lib/views/styles");
+    assert.equal(html.includes("<style"), false);
+    assert.match(stylesheet, /body \{[^}]*color: #102a43/);
+    assert.match(stylesheet, /li\.taken, li\.taken a, li\.taken p \{ color: #6b7280; \}/);
+    assert.equal(stylesheet.includes("#334e68"), false);
+    assert.equal(stylesheet.includes("#245b8a"), false);
     assert.equal(html.includes("#334e68"), false);
     assert.equal(html.includes("#245b8a"), false);
-    const rows = html.split("<li").slice(1);
+    const list = html.slice(html.indexOf('id="market-list"'));
+    const rows = list.split("<li").slice(1);
     assert.equal(rows.length, 2);
     const taken = rows.find((row) => row.includes("taken-id"));
     const open = rows.find((row) => row.includes("open-id"));
