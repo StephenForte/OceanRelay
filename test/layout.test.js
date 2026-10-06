@@ -274,7 +274,9 @@ function rateRow() {
 }
 
 function assertChrome(html, { operator = false } = {}) {
-  assert.match(html, /<a class="skip" href="#content">Skip to content<\/a>/);
+  assert.match(html, /<a class="skip" href="#main">Skip to content<\/a>/);
+  assert.match(html, /<main id="main">/);
+  assert.match(html, /<footer class="site-footer">/);
   assert.match(html, /<nav class="nav" aria-label="Primary">/);
   assert.match(html, /href="\/market"/);
   assert.match(html, /Your offers/);
