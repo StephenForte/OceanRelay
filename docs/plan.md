@@ -120,23 +120,34 @@ Planned split, subject to revision after Phase 3 lands:
 | T7 | Post-acceptance carrier statuses, mutual cancellation, disputes, seller decline on countered, marketplace availability (D-20, C-11, M-4, F-13) | **merged `6d11f17` 2026-10-01, PR #32 at `bfe1986`**. It was merged by the operator before the planner review, which then ran post-merge and found it correct (§6). One follow-up: F-14. Prompt: `docs/prompts/T7-fulfilment.md`. T8 is next. |
 | T8 | Audit log, operator screens and inconsistencies, operator carrier status, the `sub` on the home page, F-14 (D-21, C-12; no migration) | **merged 2026-10-02, PR #36 at `5230b83`** (review in §6). `OCEANRELAY_OPERATOR_SUBS` is set; `/config` shows `operatorCount: 1`. |
 | T10 | F-15: bound pending OAuth rows in the token store (D-22) | **merged 2026-10-02, PR #40 at `b13ab84`**. The operator confirmed sign-in works after the deploy. F-15 is closed. |
-| T11 | Marketplace redesign, same functionality (D-23, C-13) | **approved 2026-10-06, PR #44 at `d538bbe`**, awaiting merge (review in §6). F-16 is open. Phase 5 planning follows. |
+| T11 | Marketplace redesign, same functionality (D-23, C-13) | **merged 2026-10-06, PR #44 at `d538bbe`**; the landing page is live (operator). F-16 is open. |
 | A-4 | Phase 4 acceptance with accounts O-4(a) and O-4(c) | **Phase 4 fully accepted 2026-10-02** (operator, deployed): every step passed, including post-acceptance statuses, the refuse-then-agree cancellation, the grey fully taken row, and the operator screens and gate (§7). The T6-scope run was on 2026-10-01. |
 
 T5, T9 and T6 all touch the offer record; run them in sequence: T5 → T9 → T6.
 
 ### Phase 5 and 6 — not planned yet
 
-**Inputs collected so far:**
+**Networks and endpoints** (from the operator, 2026-10-06; verified by the planner the same day):
 
-1. **Write RPC (received 2026-10-05):** `https://fortel2-write.ente.ltd`, JSON-RPC over POST, behind Cloudflare Access.
-   - Every call sends `CF-Access-Client-Id` and `CF-Access-Client-Secret`, from environment variables `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET`. These are Render secrets, and never go in chat, prompts or the repo.
-   - Planner check: without the headers it returns 403.
-   - Workers will build against an in-process mock RPC, never this endpoint.
-2. **Read RPC:** the operator mentioned one. Its hostname is still needed.
-3. **Still needed:**
-   - the chain owner's contract-deployment process: who deploys, with which tooling, and how the address and ABI are published;
-   - a decision on wallet signatures. D-9 bans runtime dependencies, so it is either one approved small library, or hand-written secp256k1 and keccak verification on Node's built-in crypto.
+| Item | Value | Planner check |
+| --- | --- | --- |
+| ForteL2 chain ID / currency | 852 / ETH | both read RPCs return `eth_chainId` = `0x354` |
+| L1 | Ethereum Sepolia, 11155111 | — |
+| Pinned genesis | `0xe242b1a3312b509e7df1496847f0bd0b115cb66676b1e973a355296c99e2386d` | block 0 hash matches on both read RPCs |
+| Sequencer reads (public) | https://fortel2-sequencer-rpc.onrender.com/ | about 1 block every 2 s (10 blocks in 20 s) |
+| Replica reads (public) | https://fortel2-replica-rpc.onrender.com/ | **deliberately delayed about 3 minutes** (operator). Measured 146–160 blocks behind, about 5 min at 2 s per block, and it did not advance over 20 s; it may move in batches |
+| Authenticated writes (server only) | https://fortel2-write.ente.ltd | 403 without the Cloudflare Access headers |
+| Explorer | https://settlementos-explorer-ihgo.onrender.com/fortel2-sepolia/ | HTTP 200 |
+| Local lab | http://127.0.0.1:5173/ | not checked (the operator's machine) |
+
+**Consequences for the plan:**
+- Writes go only through the write RPC, with `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` from Render secrets. Those values never go in chat, prompts or the repo.
+- Receipt and confirmation checks read the **sequencer**. The replica is a deliberately delayed view, so it is useful for a later cross-check, never for confirmation. They verify `chainId` = 852, and the startup check verifies the genesis hash, so a misconfigured RPC fails closed.
+- Workers build against an in-process mock RPC only.
+
+**Still needed:**
+- the contract-deployment process: who deploys, with which tooling, and where the address and ABI are published;
+- the wallet-signature decision: approve one small audited library, which amends D-9, or hand-write the checks.
 
 Phase 6 is operator work.
 
