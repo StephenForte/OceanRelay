@@ -907,6 +907,7 @@ This section holds what previously lived only in the planning conversation. It i
   - A PR opened before the workflow existed shows no scans until its next push.
   - On #36 this looked like the scans were hanging. They had never started.
 - **Planner tooling:** on 2026-10-02 the Mac's `/usr/local/bin/python3` stopped running ("Bad CPU type", after an OS update). Use Node for scratch edits to the docs.
+- **Never splice docs with `String.prototype.replace` and a string replacement.** `$&`, `$1` and `` $` `` in the inserted text get expanded. On 2026-10-06 that duplicated plan.md to 1,624 lines; it was caught by a size check and rebuilt. Use `split(anchor).join(text + anchor)`, and check the line count before every PUT.
 - **Check bot comments on every PR before calling it done.** Cursor Bugbot runs on each
   PR. It was a false positive on #10 (it claimed URL path decoding) and a real bug on #21
   (F-11). Verify against the reviewed SHA, and record which of the two it was.
