@@ -120,16 +120,25 @@ Planned split, subject to revision after Phase 3 lands:
 | T7 | Post-acceptance carrier statuses, mutual cancellation, disputes, seller decline on countered, marketplace availability (D-20, C-11, M-4, F-13) | **merged `6d11f17` 2026-10-01, PR #32 at `bfe1986`**. It was merged by the operator before the planner review, which then ran post-merge and found it correct (§6). One follow-up: F-14. Prompt: `docs/prompts/T7-fulfilment.md`. T8 is next. |
 | T8 | Audit log, operator screens and inconsistencies, operator carrier status, the `sub` on the home page, F-14 (D-21, C-12; no migration) | **merged 2026-10-02, PR #36 at `5230b83`** (review in §6). `OCEANRELAY_OPERATOR_SUBS` is set; `/config` shows `operatorCount: 1`. |
 | T10 | F-15: bound pending OAuth rows in the token store (D-22) | **merged 2026-10-02, PR #40 at `b13ab84`**. The operator confirmed sign-in works after the deploy. F-15 is closed. |
-| T11 | Marketplace redesign: shared layout and stylesheet, landing and sign-in, dashboard, marketplace search and cards, every other screen restyled. Same functionality. (D-23, C-13) | **ready 2026-10-05**: `docs/prompts/T11-marketplace-ui.md`. Model: strongest. One task, by operator choice. Phase 5 planning follows; the operator has an RPC endpoint ready. |
+| T11 | Marketplace redesign, same functionality (D-23, C-13) | **approved 2026-10-06, PR #44 at `d538bbe`**, awaiting merge (review in §6). F-16 is open. Phase 5 planning follows. |
 | A-4 | Phase 4 acceptance with accounts O-4(a) and O-4(c) | **Phase 4 fully accepted 2026-10-02** (operator, deployed): every step passed, including post-acceptance statuses, the refuse-then-agree cancellation, the grey fully taken row, and the operator screens and gate (§7). The T6-scope run was on 2026-10-01. |
 
 T5, T9 and T6 all touch the offer record; run them in sequence: T5 → T9 → T6.
 
 ### Phase 5 and 6 — not planned yet
 
-Phase 5 needs facts we do not have: ForteL2 Sepolia RPC endpoints and access, the chain
-owner's contract deployment process, and a decision on wallet-signature libraries (D-9
-requires one). Collect these from the operator before planning. Phase 6 is operator work.
+**Inputs collected so far:**
+
+1. **Write RPC (received 2026-10-05):** `https://fortel2-write.ente.ltd`, JSON-RPC over POST, behind Cloudflare Access.
+   - Every call sends `CF-Access-Client-Id` and `CF-Access-Client-Secret`, from environment variables `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET`. These are Render secrets, and never go in chat, prompts or the repo.
+   - Planner check: without the headers it returns 403.
+   - Workers will build against an in-process mock RPC, never this endpoint.
+2. **Read RPC:** the operator mentioned one. Its hostname is still needed.
+3. **Still needed:**
+   - the chain owner's contract-deployment process: who deploys, with which tooling, and how the address and ABI are published;
+   - a decision on wallet signatures. D-9 bans runtime dependencies, so it is either one approved small library, or hand-written secp256k1 and keccak verification on Node's built-in crypto.
+
+Phase 6 is operator work.
 
 ---
 
@@ -654,6 +663,28 @@ The operator merged #32 by accident before the planner review. The review then r
   - Bugbot passed with no findings.
   - All three ran only on the round-2 push (see §8).
 
+### T11 — PR #44, `d538bbe`, approved 2026-10-06
+
+- **Base and scope:** merge-base `25e17aa` = `main`. No off-limits file. The route diffs only add `viewer` arguments and the read-only `dashboardCounts`.
+- **Gate:** 208 pass, 0 fail, 0 skip.
+- **Element ids:** 115 of the 118 ids in the `main` templates appear as literals; `requests-made` and `requests-received` come from a helper. Only the `fulfilment` section wrapper's id was dropped, and it has no consumer.
+- **Probes** (HTTP, temp files deleted):
+  - **Ten signed-in pages:** each has the layout and the stylesheet link, with no style, script or external asset. A company name and service terms containing markup are escaped.
+  - **Required copy:** present.
+  - **Names:** no counterparty name before acceptance.
+  - **404s:** byte-identical across viewers and against a hidden real id, in all three areas.
+  - **Landing page:** the settings list is gone.
+  - **Stylesheet route:** headers as specified.
+  - **Reads:** after a real mock sign-in, the dashboard read leaves the file unchanged.
+- **Planner error in the probe, recorded:** the first read-write check failed because a fake refresh token on `/` made T8 write `auth.dropped`, which is correct behaviour. It was re-run with a real mock sign-in.
+- **Rendered in the browser:**
+  - landing, dashboard (counts 3/1/2 correct), marketplace (fully taken card last), offer detail and request detail;
+  - at 375 px, the marketplace and the detail page have scroll width = viewport.
+- **Changed tests:** every counterparty-name check is still whole-page. Only the viewer's own name is exempted, inside `<header>`. Incidental, not weakened.
+- **Bugbot:** a `$` replacement bug on `06ac133` was real and is fixed on `d538bbe`. The probe shows `$1 $&` rendering literally.
+
+**F-16 (open, cosmetic, from the planner's look at the request page):** each timeline line prints the raw ISO timestamp twice, for example `2026-10-06T01:18:40.457Z Opened → Pending at 2026-10-06T01:18:40.457Z`. It should show one human-readable UTC time. Small; fold it into the next task that touches lib/views/requests.js.
+
 ---
 
 ## 7. Operator reports
@@ -876,6 +907,7 @@ This section holds what previously lived only in the planning conversation. It i
   - A PR opened before the workflow existed shows no scans until its next push.
   - On #36 this looked like the scans were hanging. They had never started.
 - **Planner tooling:** on 2026-10-02 the Mac's `/usr/local/bin/python3` stopped running ("Bad CPU type", after an OS update). Use Node for scratch edits to the docs.
+- **Never splice docs with `String.prototype.replace` and a string replacement.** `$&`, `$1` and `` $` `` in the inserted text get expanded. On 2026-10-06 that duplicated plan.md to 1,624 lines; it was caught by a size check and rebuilt. Use `split(anchor).join(text + anchor)`, and check the line count before every PUT.
 - **Check bot comments on every PR before calling it done.** Cursor Bugbot runs on each
   PR. It was a false positive on #10 (it claimed URL path decoding) and a real bug on #21
   (F-11). Verify against the reviewed SHA, and record which of the two it was.
