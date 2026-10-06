@@ -3,3 +3,9 @@ node_modules/
 data/
 *.db
 *.json.tmp
+
+# Foundry (contracts/): build output and installed dependencies. The Soldeer lockfile stays tracked.
+contracts/out/
+contracts/cache/
+contracts/dependencies/
+contracts/broadcast/
