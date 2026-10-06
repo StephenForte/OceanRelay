@@ -32,12 +32,18 @@ if (target.protocol !== "https:" && target.protocol !== "http:") {
 const port = Number(process.env.LEDGER_PROXY_PORT || 8546);
 const transport = target.protocol === "https:" ? https : http;
 
+// Listens on 127.0.0.1 only. forge script cannot attach the Access headers itself.
+// nosemgrep: problem-based-packs.insecure-transport.js-node.using-http-server.using-http-server
 const server = http.createServer((req, res) => {
-  const headers = Object.assign({}, req.headers, {
+  const headers = {
     host: target.host,
+    "content-type": "application/json",
     "CF-Access-Client-Id": clientId,
     "CF-Access-Client-Secret": clientSecret,
-  });
+  };
+  if (req.headers["content-length"]) {
+    headers["content-length"] = req.headers["content-length"];
+  }
   const base = target.pathname.replace(/\/$/, "");
   const upstream = transport.request(
     {
