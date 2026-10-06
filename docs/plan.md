@@ -127,9 +127,18 @@ T5, T9 and T6 all touch the offer record; run them in sequence: T5 → T9 → T6
 
 ### Phase 5 and 6 — not planned yet
 
-Phase 5 needs facts we do not have: ForteL2 Sepolia RPC endpoints and access, the chain
-owner's contract deployment process, and a decision on wallet-signature libraries (D-9
-requires one). Collect these from the operator before planning. Phase 6 is operator work.
+**Inputs collected so far:**
+
+1. **Write RPC (received 2026-10-05):** `https://fortel2-write.ente.ltd`, JSON-RPC over POST, behind Cloudflare Access.
+   - Every call sends `CF-Access-Client-Id` and `CF-Access-Client-Secret`, from environment variables `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET`. These are Render secrets, and never go in chat, prompts or the repo.
+   - Planner check: without the headers it returns 403.
+   - Workers will build against an in-process mock RPC, never this endpoint.
+2. **Read RPC:** the operator mentioned one. Its hostname is still needed.
+3. **Still needed:**
+   - the chain owner's contract-deployment process: who deploys, with which tooling, and how the address and ABI are published;
+   - a decision on wallet signatures. D-9 bans runtime dependencies, so it is either one approved small library, or hand-written secp256k1 and keccak verification on Node's built-in crypto.
+
+Phase 6 is operator work.
 
 ---
 
