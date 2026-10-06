@@ -757,11 +757,16 @@ describe("fully taken marketplace rows", () => {
         { id: "taken-id", available: 0, yours: false, view },
       ],
     });
-    assert.match(html, /body \{[^}]*color: #102a43/);
-    assert.match(html, /li\.taken, li\.taken a, li\.taken p \{ color: #6b7280; \}/);
+    const { stylesheet } = require("../lib/views/styles");
+    assert.equal(html.includes("<style"), false);
+    assert.match(stylesheet, /body \{[^}]*color: #102a43/);
+    assert.match(stylesheet, /li\.taken, li\.taken a, li\.taken p \{ color: #6b7280; \}/);
+    assert.equal(stylesheet.includes("#334e68"), false);
+    assert.equal(stylesheet.includes("#245b8a"), false);
     assert.equal(html.includes("#334e68"), false);
     assert.equal(html.includes("#245b8a"), false);
-    const rows = html.split("<li").slice(1);
+    const list = html.slice(html.indexOf('id="market-list"'));
+    const rows = list.split("<li").slice(1);
     assert.equal(rows.length, 2);
     const taken = rows.find((row) => row.includes("taken-id"));
     const open = rows.find((row) => row.includes("open-id"));
@@ -776,5 +781,36 @@ describe("fully taken marketplace rows", () => {
     assert.match(taken, /0 of 10 containers available in OceanRelay — Seller&#39;s claim/);
     assert.match(open, /4 of 10 containers available in OceanRelay — Seller&#39;s claim/);
     assert.equal(html.includes("Listed quantity"), false);
+  });
+
+  it("keeps dollar signs in a code-share line from rewriting the result list", () => {
+    const { buyerView } = require("../lib/offer-domain");
+    const { renderMarket } = require("../lib/views/market");
+    const terms = {
+      origin: "CNSHA",
+      destination: "USLAX",
+      equipment: "40HC",
+      quantity: 10,
+      unit: "container",
+      sailingStart: "2026-12-20",
+      sailingEnd: "2026-12-21",
+      validityDeadline: "2099-12-31",
+      currency: "USD",
+      buyerMinor: 2000,
+      codeShareName: "Taken Lane",
+      operatingCarrier: "ABC",
+      serviceTerms: "CY/CY",
+      capacityStatus: "seller_asserted",
+    };
+    const view = buyerView(terms);
+    view.codeShareLine = "Dollar $$ $& $` $' Lane, operated by ABC";
+    const html = renderMarket({
+      publishedCount: 1,
+      query: {},
+      results: [{ id: "dollar-id", available: 4, yours: false, view }],
+    });
+    assert.equal(html.includes("<!--results-->"), false);
+    assert.equal((html.match(/id="market-filters"/g) || []).length, 1);
+    assert.match(html, /Dollar \$\$ \$&amp; \$` \$&#39; Lane, operated by ABC/);
   });
 });

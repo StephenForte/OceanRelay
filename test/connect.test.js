@@ -125,7 +125,12 @@ describe("connect flow", () => {
     const home = await fetch(app.base);
     const homeHtml = await home.text();
     assert.match(homeHtml, /Disconnected/);
-    assert.match(homeHtml, /Configuration check/);
+    assert.equal(homeHtml.includes("Configuration check"), false);
+    assert.equal(homeHtml.includes("RATE_NINJA_CLIENT_ID"), false);
+    const configPage = await fetch(`${app.base}/config`);
+    const configBody = await configPage.json();
+    assert.equal(configBody.settings.RATE_NINJA_CLIENT_ID, "set");
+    assert.equal(configBody.settings.SESSION_SECRET, "set");
     assert.equal(homeHtml.includes(CLIENT_SECRET), false);
     const cookie = cookieHeader(home);
     assert.match(cookie, /oceanrelay_session=/);
