@@ -460,6 +460,10 @@ function seedCompany(store, sid, csrf, profile) {
   return { cookie: sessionCookie(sid, csrf), csrf };
 }
 
+function withoutHeader(html) {
+  return html.replace(/<header[\s\S]*?<\/header>/, "");
+}
+
 function elementText(html, id) {
   const match = html.match(new RegExp(`id="${id}">([^<]*)`));
   return match ? match[1] : "";
@@ -532,12 +536,14 @@ describe("request screens", () => {
       assert.match(buyerPage.html, /Pending/);
       assert.match(buyerPage.html, /Version 1/);
       assert.equal(buyerPage.html.includes("Kings"), false);
-      assert.equal(buyerPage.html.includes("Other Co"), false);
+      assert.equal(withoutHeader(buyerPage.html).includes("Other Co"), false);
+      assert.equal(buyerPage.html.includes('class="company">Other Co<'), true);
       assert.equal(buyerPage.html.includes("A contract owner"), false);
       const sellerPage = await pageOf(base, seller.cookie, requestPath);
       assert.match(sellerPage.html, /A contract owner/);
       assert.equal(sellerPage.html.includes("Other Co"), false);
-      assert.equal(sellerPage.html.includes("Kings"), false);
+      assert.equal(withoutHeader(sellerPage.html).includes("Kings"), false);
+      assert.equal(sellerPage.html.includes('class="company">Kings<'), true);
 
       const listed = await pageOf(base, buyer.cookie, "/requests");
       assert.match(listed.html, /Requests you made/);
@@ -860,18 +866,28 @@ describe("request screens", () => {
         assert.equal(elementText(html, "requested-quantity"), "3");
         assert.match(elementText(html, "listed-quantity"), /^10 /);
         assert.equal(html.includes('id="accept-quantity"'), false);
-        assert.equal(html.includes("Harbor"), false);
-        assert.equal(html.includes("Kings"), false);
         assert.equal(html.includes(MARKUP), false);
+        assert.equal(html.includes('id="seller-name"'), false);
+        assert.equal(html.includes('id="buyer-name"'), false);
       }
+      assert.equal(withoutHeader(buyerPending.html).includes("Harbor"), false);
+      assert.equal(buyerPending.html.includes("Kings"), false);
+      assert.equal(buyerPending.html.includes("Harbor&lt;"), true);
+      assert.equal(sellerPending.html.includes("Harbor"), false);
+      assert.equal(withoutHeader(sellerPending.html).includes("Kings"), false);
+      assert.equal(sellerPending.html.includes('class="company">Kings<'), true);
       const buyerList = await pageOf(base, buyer.cookie, "/requests");
       const sellerList = await pageOf(base, seller.cookie, "/requests");
       const preview = await pageOf(base, seller.cookie, `/offers/${offer.id}`);
       for (const html of [buyerList.html, sellerList.html, preview.html]) {
-        assert.equal(html.includes("Harbor"), false);
-        assert.equal(html.includes("Kings"), false);
         assert.equal(html.includes(MARKUP), false);
       }
+      assert.equal(withoutHeader(buyerList.html).includes("Harbor"), false);
+      assert.equal(buyerList.html.includes("Kings"), false);
+      assert.equal(sellerList.html.includes("Harbor"), false);
+      assert.equal(withoutHeader(sellerList.html).includes("Kings"), false);
+      assert.equal(preview.html.includes("Harbor"), false);
+      assert.equal(withoutHeader(preview.html).includes("Kings"), false);
 
       const countered = await postForm(base, seller.cookie, `${requestPath}/counter`, {
         csrf_token: sellerPending.csrf,
@@ -890,17 +906,25 @@ describe("request screens", () => {
         assert.equal(elementText(page.html, "accept-unit-price").includes("25.00"), true);
         assert.equal(elementText(page.html, "accept-total").includes("100.00"), true);
         assert.match(page.html, /Accept commits these terms/);
-        assert.equal(page.html.includes("Harbor"), false);
-        assert.equal(page.html.includes("Kings"), false);
         assert.equal(page.html.includes(MARKUP), false);
+        assert.equal(page.html.includes('id="seller-name"'), false);
+        assert.equal(page.html.includes('id="buyer-name"'), false);
       }
+      const buyerCounterPage = await pageOf(base, buyer.cookie, requestPath);
+      const sellerCounterPage = await pageOf(base, seller.cookie, requestPath);
+      assert.equal(withoutHeader(buyerCounterPage.html).includes("Harbor"), false);
+      assert.equal(buyerCounterPage.html.includes("Kings"), false);
+      assert.equal(sellerCounterPage.html.includes("Harbor"), false);
+      assert.equal(withoutHeader(sellerCounterPage.html).includes("Kings"), false);
       const counteredList = await pageOf(base, seller.cookie, "/requests");
       const counteredPreview = await pageOf(base, seller.cookie, `/offers/${offer.id}`);
       const counteredBuyerList = await pageOf(base, buyer.cookie, "/requests");
-      for (const html of [counteredList.html, counteredPreview.html, counteredBuyerList.html]) {
-        assert.equal(html.includes("Harbor"), false);
-        assert.equal(html.includes("Kings"), false);
-      }
+      assert.equal(counteredList.html.includes("Harbor"), false);
+      assert.equal(withoutHeader(counteredList.html).includes("Kings"), false);
+      assert.equal(counteredPreview.html.includes("Harbor"), false);
+      assert.equal(withoutHeader(counteredPreview.html).includes("Kings"), false);
+      assert.equal(withoutHeader(counteredBuyerList.html).includes("Harbor"), false);
+      assert.equal(counteredBuyerList.html.includes("Kings"), false);
 
       const buyerCounter = await pageOf(base, buyer.cookie, requestPath);
       const accepted = await postForm(base, buyer.cookie, `${requestPath}/accept`, {
