@@ -135,14 +135,14 @@ T5, T9 and T6 all touch the offer record; run them in sequence: T5 → T9 → T6
 | L1 | Ethereum Sepolia, 11155111 | — |
 | Pinned genesis | `0xe242b1a3312b509e7df1496847f0bd0b115cb66676b1e973a355296c99e2386d` | block 0 hash matches on both read RPCs |
 | Sequencer reads (public) | https://fortel2-sequencer-rpc.onrender.com/ | about 1 block every 2 s (10 blocks in 20 s) |
-| Replica reads (public) | https://fortel2-replica-rpc.onrender.com/ | 146–160 blocks (about 5 min) behind the sequencer; did not advance over 20 s |
+| Replica reads (public) | https://fortel2-replica-rpc.onrender.com/ | **deliberately delayed about 3 minutes** (operator). Measured 146–160 blocks behind, about 5 min at 2 s per block, and it did not advance over 20 s; it may move in batches |
 | Authenticated writes (server only) | https://fortel2-write.ente.ltd | 403 without the Cloudflare Access headers |
 | Explorer | https://settlementos-explorer-ihgo.onrender.com/fortel2-sepolia/ | HTTP 200 |
 | Local lab | http://127.0.0.1:5173/ | not checked (the operator's machine) |
 
 **Consequences for the plan:**
 - Writes go only through the write RPC, with `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` from Render secrets. Those values never go in chat, prompts or the repo.
-- Receipt and confirmation checks read the **sequencer**, because the replica lags. They verify `chainId` = 852, and the startup check verifies the genesis hash, so a misconfigured RPC fails closed.
+- Receipt and confirmation checks read the **sequencer**. The replica is a deliberately delayed view, so it is useful for a later cross-check, never for confirmation. They verify `chainId` = 852, and the startup check verifies the genesis hash, so a misconfigured RPC fails closed.
 - Workers build against an in-process mock RPC only.
 
 **Still needed:**
