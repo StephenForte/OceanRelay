@@ -2,7 +2,7 @@
 
 OceanRelay connects a contract-owner Rate Ninja account. The Rate Ninja OAuth client may still be named Capacity Exchange.
 
-`npm start` runs the HTTP service on `0.0.0.0:$PORT`. `GET /health` returns `{"status":"ok"}`.
+`npm start` runs the HTTP service on `0.0.0.0:$PORT`. `GET /health` returns `{"status":"ok"}`. `GET /assets/oceanrelay.css` serves the shared stylesheet; `?v=` is its SHA-256.
 
 ## Environment variables
 
