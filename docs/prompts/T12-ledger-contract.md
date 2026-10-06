@@ -60,7 +60,7 @@ So:
 **4. A deploy script, `script/Deploy.s.sol`:**
 - It reads `RELAYER_ADDRESS`, `REGISTRAR_ADDRESS` and an optional comma-separated `OPERATOR_ADDRESSES` from the environment. These are **addresses only**: the script must never read or print a private key. The broadcaster is the owner key, which the operator passes on the command line (`--account` or similar).
 - It refuses to run unless `block.chainid` is 852 or 31337 (local anvil).
-- It prints the deployed address, the relayer, the operators, and `keccak256` of the deployed runtime code, which D-24's startup check needs.
+- It prints the deployed address, the relayer, the registrar, the operators, and `keccak256` of the deployed runtime code, which D-24's startup check needs.
 
 **5. EIP-712 test vectors: `contracts/vectors/eip712.json`.**
 - Contents:
@@ -85,7 +85,7 @@ So:
 
 The write RPC requires two Cloudflare Access headers (D-24). **Find out whether your Foundry version can send custom RPC headers** (check `forge script --help` and `cast --help` for a headers option). If it can, show the flag reading `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` from the environment. If it cannot, give a minimal local header-adding proxy command instead. Say which, and on what evidence.
 
-Finally, list what the operator records in `deployments/fortel2-sepolia.json`: the address, the deploy transaction hash, the block, the runtime-code hash, the owner, the relayer and the operators. That PR is the operator's (O-10), not yours.
+Finally, list what the operator records in `deployments/fortel2-sepolia.json`: the address, the deploy transaction hash, the block, the runtime-code hash, the owner, the relayer, the registrar and the operators. That PR is the operator's (O-10), not yours.
 
 ## The traps
 
@@ -116,7 +116,7 @@ Finally, list what the operator records in `deployments/fortel2-sepolia.json`: t
 
 ## Must not change
 
-- The Node service, entirely: lib/, server.js, test/ (the Node tests), package.json and package-lock.json.
+- The Node service, entirely: lib/, server.js, test/ (the Node tests) and package.json. The repo has no package-lock.json; do not add one.
 - The existing workflow `.github/workflows/security-scans.yml`.
 - All of docs/.
 
