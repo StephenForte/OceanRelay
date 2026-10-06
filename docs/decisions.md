@@ -401,6 +401,43 @@ user then sees `invalid_state` and clicks Connect again. The alternative, refusi
 rows when full, would let the same attacker block every sign-in for 10 minutes.
 Per-client rate limiting is out of scope; revisit if it is ever seen.
 
+### D-23 — Marketplace look and shared layout (2026-10-05, operator decisions)
+
+The operator wants the prototype to look and feel like a marketplace for demos, with
+**the same functionality**. Decided on 2026-10-05:
+- **Look:** modern navy and teal. That means a navy header bar, white cards on a light
+  grey page, teal for primary actions, and a system sans-serif font stack.
+- **Split:** one task (T11) for every screen.
+
+**What the redesign may and may not change:**
+- **Unchanged:**
+  - every route, method, form field name, redirect target and status code;
+  - every records and store read or write;
+  - CSRF, escaping, byte-identical 404s, and "reads never write";
+  - every element `id`;
+  - every copy sentence that a decision requires (D-18, D-19, D-20, D-21, F-14, the
+    seller's-claim caveats, "recorded by", "Terms fingerprint").
+- **Changes:**
+  - markup structure, CSS, labels that no decision requires, and page composition;
+  - a read-only signed-in dashboard on `/`.
+- **The signed-out home page becomes a landing page** with a "Sign in with Rate Ninja"
+  button. The settings list ("Configuration check") moves off it. `/config` already
+  serves it as JSON. When `config.ok` is false, the landing page shows one plain notice
+  ("Sign-in is not available right now") and lists no settings.
+- **No external assets:** no web fonts, CDNs, images or scripts. The logo is inline SVG.
+  The pages need no JavaScript, and there are no inline `<script>` tags, which leaves a
+  later Content-Security-Policy easy.
+- **Accessibility floor:**
+  - text contrast at least 4.5:1, and at least 3:1 for large text and UI borders;
+  - a visible focus ring;
+  - a label on every input;
+  - `header`, `nav` and `main` landmarks, plus a skip link;
+  - status never shown by colour alone;
+  - no horizontal scroll at 375 px wide;
+  - `prefers-reduced-motion` respected.
+- **One stylesheet,** served by OceanRelay at `/assets/oceanrelay.css` with a
+  content-hash cache-buster. No page carries its own `<style>`.
+
 ## Interface contracts
 
 A contract is the surface other tasks build on. The task named as owner publishes it; later
@@ -660,3 +697,31 @@ edits or deletes an entry.
 In that case:
 - `actorCompanyId` is the operator's own company;
 - `note` is non-empty.
+
+### C-13 — Page layout and stylesheet (owner: T11; implements D-23)
+
+`lib/views/layout.js` exports `renderLayout({ title, nav, body, flash })`. It returns a
+complete HTML document:
+- the header: the logo, the nav links, and the company name plus Disconnect when signed
+  in;
+- a skip link;
+- `<main id="main">` containing `body`;
+- a footer.
+
+`nav` is `{ active, signedIn, isOperator, companyName, csrf }`.
+- `active` is one of `market`, `offers`, `requests`, `operator`, `home`.
+- `companyName` is escaped inside the layout.
+
+Every HTML page goes through `renderLayout`, except the JSON responses and the router's
+JSON 404.
+
+`lib/views/styles.js` exports the stylesheet text and its version hash. `GET
+/assets/oceanrelay.css` serves it with:
+- `Content-Type: text/css; charset=utf-8`;
+- `Cache-Control: public, max-age=31536000, immutable`.
+
+Pages link it as `/assets/oceanrelay.css?v=<hash>`.
+
+Later pages, Phase 5 included, are added through `renderLayout` and the shared
+component classes: card, pill, button, form row, table and banner. They are not added
+with their own markup scaffolding.
