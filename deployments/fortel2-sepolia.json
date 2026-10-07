@@ -1,0 +1,19 @@
+{
+  "network": "ForteL2 Sepolia",
+  "chainId": 852,
+  "genesisHash": "0xe242b1a3312b509e7df1496847f0bd0b115cb66676b1e973a355296c99e2386d",
+  "contract": "OceanRelayLedger",
+  "address": "0x481175bC15eE6e22EAB97176540a98aB6a2925eF",
+  "deployTransaction": "0x8e8039d2ddd77b9b382ee34f8241a8b0b0fe5dcc9706c0b6e2235b1593cbc9c3",
+  "block": 1991782,
+  "blockHash": "0xaf42a5054c1bff294eca3b7c737e86f448208587eda861b57fe5c9754f726d66",
+  "runtimeCodeHash": "0x09b8d5ce915d4ec763ba0746fb14eeda0fafd9adca4875b359196f03611ee151",
+  "domainSeparator": "0x48179b30b90283b2dc618570f6e6c215f23709f99838e58ce92e0bd131fd5956",
+  "owner": "0x0Ac2B0d0A4Eb9d223633B91e03F79971DB953C20",
+  "relayer": "0xf8B8B3b58ebaC9fC530D9244C22f391E90CC8ae2",
+  "registrar": "0x32b2231464F99B81f5fcffbbA66b99fdA97bB116",
+  "operators": [],
+  "source": "contracts/src/OceanRelayLedger.sol at main 21e962d (T12, PR #47); solc 0.8.28, evm cancun, OpenZeppelin 5.7.0",
+  "deployedAt": "2026-10-07",
+  "verifiedBy": "planner on 2026-10-07, against the public sequencer: receipt status 1; keccak256(eth_getCode) equals runtimeCodeHash; owner, relayer and registrar as listed, pendingOwner zero, not paused; domain separator recomputed in Node from name, version, 852 and address"
+}
