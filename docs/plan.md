@@ -131,7 +131,7 @@ Tasks, in order. Each runs after the previous one merges.
 
 | Id | Task | Owns | Model | Status |
 | --- | --- | --- | --- | --- |
-| T12 | OceanRelayLedger contract, Foundry tests, deploy script, EIP-712 test vectors, contracts CI (C-14) | `contracts/**`, `.github/workflows/contracts.yml` | strongest | **ready 2026-10-06**: `docs/prompts/T12-ledger-contract.md` |
+| T12 | OceanRelayLedger contract, Foundry tests, deploy script, EIP-712 test vectors, contracts CI (C-14) | `contracts/**`, `.github/workflows/contracts.yml` | strongest | **approved 2026-10-06, PR #47 at `113c8f4`**, awaiting merge (review in §6) |
 | O-10 | **The operator deploys** T12's contract to chain 852 with the owner key, records the address, transaction, block and runtime-code hash in `deployments/fortel2-sepolia.json` via a PR, and generates the relayer and registrar keys and funds the relayer | operator | — | after T12 |
 | T13 | Chain client: write RPC with the Access headers; relayer transaction signing (`@noble/*`); sequencer receipts; pending, retry and reconcile; startup checks (D-24). It must match T12's test vectors. | `lib/chain*.js` | strongest | after O-10 |
 | T14 | Wallet binding: the wallet-page script (D-25), the EIP-712 `Binding`, and the binding record and screens | — | strong | after T13 |
@@ -709,6 +709,28 @@ The operator merged #32 by accident before the planner review. The review then r
 - **Bugbot:** a `$` replacement bug on `06ac133` was real and is fixed on `d538bbe`. The probe shows `$1 $&` rendering literally.
 
 **F-16 (open, cosmetic, from the planner's look at the request page):** each timeline line prints the raw ISO timestamp twice, for example `2026-10-06T01:18:40.457Z Opened → Pending at 2026-10-06T01:18:40.457Z`. It should show one human-readable UTC time. Small; fold it into the next task that touches lib/views/requests.js.
+
+### T12 — PR #47, `113c8f4`, approved 2026-10-06
+
+- **Base and scope:** merge-base `c464ae2` = `main`. Contracts only; the Node side is untouched.
+- **Gate** (planner, local Foundry 1.8.5): Soldeer install, 84 forge tests pass, `forge fmt` clean; `npm test` 208/0/0.
+- **EIP-712 vectors, checked independently:**
+  - Recomputed in Node, with its built-in `keccak-256`, from the **C-14 text**: the domain separator, the 8 type strings (byte-identical), type hashes, struct hashes and digests all match.
+  - Every signature recovers to the test signer through the `ecrecover` precompile on anvil, and all are low-s (50/50 checks).
+  - **Shown to fail:** with one C-14 type altered, 5 checks go red.
+- **Mutation tests:** removing the registrar check, the same-company check, the replay guard, the status `seq`, the two-company acceptance or the expiry time check each turns the suite red (1 to 4 failures). Removing the extra zero-address check does not, because OpenZeppelin `tryRecover` already rejects a zero recovery.
+- **Deploy dry run:**
+  - the printed code hash equals `keccak(eth_getCode)`;
+  - owner = broadcaster, and the relayer and registrar are set;
+  - sending ETH reverts;
+  - chain 1 is refused.
+- **access-proxy.js:** bound to 127.0.0.1, never prints the secrets, sends only the Access headers.
+- **Scans:** contracts CI, Semgrep (0 findings), Trivy and Bugbot all pass.
+
+**Notes for later tasks (not defects):**
+- **O-10:** `OPERATOR_ADDRESSES` must be the operator's own wallets, never the relayer or registrar. If an operator equals the relayer, the relayer key alone can record statuses. The deploy script does not check this.
+- **T15:** `recordRequest` and `recordAcceptance` check only the offer's stored state, not `block.timestamp` against `expiresAt`. A retry of an acceptance made just before expiry can therefore still land. That suits pending and retry handling, but T15 must call `markExpired` itself and reconcile accordingly.
+- **T13:** the runtime-code hash includes the EIP-712 immutables (chain ID and address), so D-24's startup check must compare against the hash the deploy script printed, which is recorded in `deployments/fortel2-sepolia.json`, not against a hash of the build artifact.
 
 ---
 
