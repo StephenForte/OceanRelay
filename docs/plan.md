@@ -131,8 +131,8 @@ Tasks, in order. Each runs after the previous one merges.
 
 | Id | Task | Owns | Model | Status |
 | --- | --- | --- | --- | --- |
-| T12 | OceanRelayLedger contract, Foundry tests, deploy script, EIP-712 test vectors, contracts CI (C-14) | `contracts/**`, `.github/workflows/contracts.yml` | strongest | **approved 2026-10-06, PR #47 at `113c8f4`**, awaiting merge (review in §6) |
-| O-10 | **The operator deploys** T12's contract to chain 852 with the owner key, records the address, transaction, block and runtime-code hash in `deployments/fortel2-sepolia.json` via a PR, and generates the relayer and registrar keys and funds the relayer | operator | — | after T12 |
+| T12 | OceanRelayLedger contract, Foundry tests, deploy script, EIP-712 test vectors, contracts CI (C-14) | `contracts/**`, `.github/workflows/contracts.yml` | strongest | **merged 2026-10-06, PR #47 at `113c8f4`** (review in §6) |
+| O-10 | **The operator deployed** OceanRelayLedger to chain 852 on 2026-10-07: address `0x481175bC15eE6e22EAB97176540a98aB6a2925eF`, transaction `0x8e80…c9c3`, block 1991782. Recorded in `deployments/fortel2-sepolia.json`. The relayer is funded with 0.01 ETH and the owner has 0.002 ETH left, both deposited from Sepolia through L1StandardBridge `0x113A…85a7`. | operator | — | **done 2026-10-07**; planner verified (§7) |
 | T13 | Chain client: write RPC with the Access headers; relayer transaction signing (`@noble/*`); sequencer receipts; pending, retry and reconcile; startup checks (D-24). It must match T12's test vectors. | `lib/chain*.js` | strongest | after O-10 |
 | T14 | Wallet binding: the wallet-page script (D-25), the EIP-712 `Binding`, and the binding record and screens | — | strong | after T13 |
 | T15 | Publish, version, state, request, acceptance, status and cancellation recorded on chain, with pending, confirmed and failed shown in the UI | — | strongest | after T14 |
@@ -926,6 +926,30 @@ The operator reported every step passed:
 - `/operator` as `testbuyer` showed only `{"error":"not found"}`.
 
 `/config` showed `"operatorCount": 1` and no id. The operator chose to do F-15 (T10) before Phase 5 planning.
+
+### 2026-10-07 — O-10: ledger deployed to chain 852 (operator), verified by the planner
+
+- **Funding.** ETH reaches chain 852 by deposit from Sepolia.
+  - The bridge is L1StandardBridge v2.8.2 at `0x113AAd08047E9a9B1556627A658f87F0EbEf85a7`. The planner read it from the L2 predeploy `0x4200…0010`'s `otherBridge()` and checked it on Sepolia: it points back at the L2 bridge, it is unpaused, and the portal `0xf8c7…b54E` held 0.248 ETH.
+  - Deposits used `depositETHTo(addr, 200000, 0x)`, about 636k Sepolia gas each, arriving on chain 852 within about 16 s to a few minutes.
+  - Chain 852 is OP-Stack (GasPriceOracle 1.6.0, L1 base fee 13 wei).
+- **Keys.** The deploy ran from a fresh clone in `~/oceanrelay-deploy`, with Foundry keystore accounts `owner`, `relayer` and `registrar`.
+- **Cloudflare Access.** The first direct test returned 403 (a typo during hidden entry); re-entering the values gave 200 and `0x354`.
+- **The deploy.** It went through `contracts/script/access-proxy.js`. It cost 3,339,722 gas, paid 0.00000000084 ETH.
+- **Planner checks against the sequencer:**
+  - receipt status 1, from the owner, block 1991782;
+  - `keccak256(eth_getCode)` = the printed `runtimeCodeHash` `0x09b8…e151`;
+  - owner, relayer and registrar as recorded; `pendingOwner` zero; not paused;
+  - `eip712Domain` = ("OceanRelay", "1", 852, address);
+  - the domain separator `0x4817…5956`, recomputed in Node, matches;
+  - the explorer serves the transaction page (HTTP 200).
+- **Operators:** none registered yet. Add one later with the owner key (`setOperator`). It must never be the relayer or registrar.
+- **Gaps found in T12's README during the deploy, all covered in the planner's chat steps:**
+  - it does not run `forge soldeer install`;
+  - it does not say the owner needs ETH;
+  - it does not explain that `$(cast wallet address --account X)` prompts for **X**'s password;
+  - it does not explain that the public RPC refuses transactions, so ETH arrives by bridge deposit.
+  - **F-17:** fix the README. Fold this into T13, which touches the README for the new env vars.
 
 ---
 
