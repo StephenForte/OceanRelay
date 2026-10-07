@@ -1,0 +1,39 @@
+name: Contracts
+
+on:
+  pull_request:
+    paths:
+      - "contracts/**"
+
+permissions:
+  contents: read
+
+jobs:
+  forge:
+    name: Foundry
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # Action commit is tag v1.9.1 of foundry-rs/foundry-toolchain
+      # (GitHub API: repos/foundry-rs/foundry-toolchain/git/ref/tags/v1.9.1).
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
+        with:
+          version: v1.8.5
+
+      - name: Install dependencies
+        run: forge soldeer install
+
+      - name: Build
+        run: forge build
+
+      - name: Test
+        run: forge test
+
+      - name: Format
+        run: forge fmt --check

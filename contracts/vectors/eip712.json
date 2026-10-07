@@ -1,0 +1,136 @@
+{
+  "domain": {
+    "name": "OceanRelay",
+    "version": "1",
+    "chainId": 852,
+    "verifyingContract": "0x000000000000000000000000000000000000c014",
+    "separator": "0xf6961299f0076850daf1397fbd2c3f4e68f160b261393752c9c631404a576fad"
+  },
+  "signer": {
+    "address": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+    "privateKey": "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+    "label": "Anvil default account 0. Test only. Never use for real funds."
+  },
+  "types": {
+    "Binding": {
+      "typeString": "Binding(bytes32 companyKey,address wallet,uint64 deadline)",
+      "typeHash": "0xc7f5d2249a1b91f013ae696ac021a163e9353c12cf32ec19385e13390b8f4598"
+    },
+    "Publish": {
+      "typeString": "Publish(bytes32 offerId,bytes32 commitment,uint64 expiresAt,uint64 deadline)",
+      "typeHash": "0xcf466c1cadc8f02e27654fd5f5713f22d044ab77c07992ab5967eec6e6616bcc"
+    },
+    "Version": {
+      "typeString": "Version(bytes32 offerId,uint32 version,bytes32 commitment,uint64 expiresAt,uint64 deadline)",
+      "typeHash": "0x4cee12fa816e52a4fc13d88ae6aae8613f19d6c64861ea03a56167aa473c2baa"
+    },
+    "OfferState": {
+      "typeString": "OfferState(bytes32 offerId,uint8 state,uint32 seq,uint64 deadline)",
+      "typeHash": "0x1955f168223c02ba3746822b96aaac6f47ae4f66ad609d7522cf6493fb75668c"
+    },
+    "Request": {
+      "typeString": "Request(bytes32 requestId,bytes32 offerId,uint32 version,uint64 deadline)",
+      "typeHash": "0x30ed669a199a78dd6ed59fb3ffa9c2ef79916c346511b0a0fa38313325ec646c"
+    },
+    "Acceptance": {
+      "typeString": "Acceptance(bytes32 requestId,uint32 counter,bytes32 termsCommitment,uint64 deadline)",
+      "typeHash": "0x6f6fc513c4f00d83bf63844b9463a0246cc16c780274627cffb5091f9eb5d101"
+    },
+    "Status": {
+      "typeString": "Status(bytes32 requestId,uint8 status,uint32 seq,uint64 deadline)",
+      "typeHash": "0x670110365a6f7242a8debf10043c05ab6682f1ae3cce431f616e17bfacdf8446"
+    },
+    "Cancellation": {
+      "typeString": "Cancellation(bytes32 requestId,uint64 deadline)",
+      "typeHash": "0x76c2b4f891ce7c175d04cc56d825240c2138fe3427e4e6c02a12363871d9d2fb"
+    }
+  },
+  "samples": {
+    "Binding": {
+      "message": {
+        "companyKey": "0x1111111111111111111111111111111111111111111111111111111111111111",
+        "wallet": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+        "deadline": 1893456000
+      },
+      "structHash": "0x2c50a2277d7068d8997fe44b46f7a1e7e981c3a5b7805a893f45e3eea90a55c2",
+      "digest": "0x9513b9aec50aebdc5634e23f6680a9b236c8e5c7fbfb364857268e6ebc725ade",
+      "signature": "0xcf4bc98c7d5e7656f7c9a39d62432bcace84d44a74d0e1f744b6c5da4aa1d8181bf7df3c763c4c32e47b19f3d97bbe23a369224f546bc302022d1f89b28198db1b"
+    },
+    "Publish": {
+      "message": {
+        "offerId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+        "commitment": "0x3333333333333333333333333333333333333333333333333333333333333333",
+        "expiresAt": 1893456000,
+        "deadline": 1893456000
+      },
+      "structHash": "0x6e7f4d54197a40aa5fc74da3274ccb53ab08a7f1c76093af4f834274b8cb8182",
+      "digest": "0xaaa9ada3a7bf38796c8f4a3019f3d32a62e3ef25bcbb70dc8961eb7d7d7c2ba6",
+      "signature": "0x4dae5e7274a83f20c6e8fbebd47f836282c1fd1e7c33a4c5721b3292668211c01b22dce1671c03b0802a4574f3935509eb57617d2b2eebaace9b22321eccb3fc1c"
+    },
+    "Version": {
+      "message": {
+        "offerId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+        "version": 2,
+        "commitment": "0x3333333333333333333333333333333333333333333333333333333333333333",
+        "expiresAt": 1893456000,
+        "deadline": 1893456000
+      },
+      "structHash": "0x898bba94b5addf72e1f724979ba939863caac8d8c3ac74c89ed6f1edc5407017",
+      "digest": "0x9e79b9510ea8d76d55d22aefede8831c89a027af2a3cd3169853532d1d990c1e",
+      "signature": "0x2de73b26a830a749d7b5793ba755a93131893ceeea11ed3434648c2cd2bebd6153e34a96d705b8aec586f74b516537e8726cf75703021aff037125b055122f951b"
+    },
+    "OfferState": {
+      "message": {
+        "offerId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+        "state": 1,
+        "seq": 7,
+        "deadline": 1893456000
+      },
+      "structHash": "0x832358ed9bc569b39b0bcb49a5e2ad18851d29570d7275be10784e451d10d93b",
+      "digest": "0x56b647815004d6aa59e62a1e8eb9065eb236a8e417317e5d141c9fbf6621162e",
+      "signature": "0x301aa06f24fe21c0a91bae30da930958219b782b679bd346c0fcc8cf574ae2f705289184d1574cf9f78d12695a07f466ed049480af3b1630f928f0a43db5e1011c"
+    },
+    "Request": {
+      "message": {
+        "requestId": "0x4444444444444444444444444444444444444444444444444444444444444444",
+        "offerId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+        "version": 3,
+        "deadline": 1893456000
+      },
+      "structHash": "0x9e02fb0d161c531285177274c0edc846354d9bf1b753ce047b1c1d776173f161",
+      "digest": "0x306d70c066a944118825279d46a0d032ef877807b9078f02d91b095cdf1b62ec",
+      "signature": "0xe9289374a11108b1df2662ff86bc9c8cfd90f0f9dceccb28af73f0217196e1b133a3b0b022e0515289dcbd283f7e6600ad74baa6a1c29321fd1941d3dd1978771b"
+    },
+    "Acceptance": {
+      "message": {
+        "requestId": "0x4444444444444444444444444444444444444444444444444444444444444444",
+        "counter": 4,
+        "termsCommitment": "0x5555555555555555555555555555555555555555555555555555555555555555",
+        "deadline": 1893456000
+      },
+      "structHash": "0xa7af110e3642ff17ce3173a96ab2f4361e1479f7ae1e8b534ed19bdd7fec512c",
+      "digest": "0x6345608ac9a2d4a73005ed735975e2c60d07616b3530a00a25cae9c4d48c3a4b",
+      "signature": "0xd816c6b7b2b44f9d6fae91bbf503ac834e9494417a3884b36f4245b533b89c7c79c353393a1e4ad723b4b06cbad1a1ede1a94f68aca095a687a5548b2b3bdd4f1b"
+    },
+    "Status": {
+      "message": {
+        "requestId": "0x4444444444444444444444444444444444444444444444444444444444444444",
+        "status": 3,
+        "seq": 8,
+        "deadline": 1893456000
+      },
+      "structHash": "0x61d96b4cde95f341fa0f0bde5bbc7b9061578e4eb9f8ab9ff6d89efbd6e3acf7",
+      "digest": "0x64888247902b756e6220d9185be0648a6327cf07af2f1d4d67e6623e37bfd923",
+      "signature": "0x539944051201d68ac6e5f1e0c1452a1f8c58f1ef98fcef01ec4db49edb418c300010aabebbcbf9ffd16b010d75a3b183cf63247cece4a90a1b87006d0467f3661b"
+    },
+    "Cancellation": {
+      "message": {
+        "requestId": "0x4444444444444444444444444444444444444444444444444444444444444444",
+        "deadline": 1893456000
+      },
+      "structHash": "0x57248a7a309b6d23a1e02408e85af85132076a594aa8b68ebeb70e98b37c5fa3",
+      "digest": "0x7bad86fb3134d4748306ed3e68a90a044898ebc5ea2023f679611cb8da1812dc",
+      "signature": "0x69f3f60df8d5673f7d7f4acec1ce68e7e3dcf8226af89f1a83667b53434708f368352f39e013fc4c39e7a9c6f115add6a05de58dff9b47f24edf3905832fe5881c"
+    }
+  }
+}
