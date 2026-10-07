@@ -496,6 +496,47 @@ Neither the planner nor any worker handles a private key.
   - None of this ships in the Node service.
 - **D-23 amended:** one first-party script is allowed, served from `/assets` and included **only on wallet pages**. It is plain JavaScript with no library, and it calls the browser wallet (EIP-1193 `eth_requestAccounts`, `eth_signTypedData_v4`). The marketplace and every other page stay script-free.
 
+### D-26 — Chain client behaviour: fail closed on the chain, never on the marketplace (2026-10-07)
+
+**Facts it rests on** (planner, 2026-10-07):
+- Render builds OceanRelay with `npm install` and starts it with `npm start`, on its Python image with Node.
+- Node is picked from `engines`: `>=20.12` resolved to 26.10.0 on 2026-10-06 and 26.11.0 on 2026-10-07. This closes O-5.
+- The ledger is deployed (`deployments/fortel2-sepolia.json`).
+
+**Rules:**
+- **Pin Node:** `engines.node` becomes `"26.x"`, so Render stops floating to the newest major.
+- **Hashing:** all Keccak hashing uses `@noble/hashes` `keccak_256`, not Node's built-in `keccak-256`. The built-in depends on the OpenSSL build. This supersedes the sentence in D-25 allowing the built-in. Both noble packages are pinned to exact versions, and `package-lock.json` is committed.
+- **When the chain is enabled.** Chain features are on only when all four secrets are set: `OCEANRELAY_RELAYER_KEY`, `OCEANRELAY_REGISTRAR_KEY`, `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET`.
+  - None set: `disabled`.
+  - Some set: `misconfigured`, with reason `incomplete`.
+  - `FORTEL2_WRITE_RPC` and `FORTEL2_READ_RPC` default to the write endpoint and the sequencer. `OCEANRELAY_CHAIN_MAX_FEE_GWEI` defaults to 1.
+- **Startup check, against the read RPC and `deployments/fortel2-sepolia.json`:**
+  - `eth_chainId` = 852;
+  - block 0 hash = the pinned genesis;
+  - `keccak256(eth_getCode(address))` = `runtimeCodeHash`;
+  - `relayer()` on the contract = the address of `OCEANRELAY_RELAYER_KEY`;
+  - `registrar()` = the address of `OCEANRELAY_REGISTRAR_KEY`;
+  - the contract is not paused.
+- **Mismatch versus outage:**
+  - A **mismatch** sets `misconfigured` for the life of the process, with the reason recorded.
+  - An **outage** (timeouts, connection errors, 5xx) sets `degraded`, and the check is retried every 60 s until `ready`.
+  - **Either way the marketplace keeps working.** Phase 4 features never depend on the chain being up. This amends D-24's "refuses to start": OceanRelay refuses to *use* a wrong or unreachable chain; it does not refuse to serve.
+- **Where traffic goes:**
+  - Reads (`eth_call`, receipts, nonce, fees, code and blocks) go only to the read RPC.
+  - The write RPC receives only `eth_sendRawTransaction`.
+  - The Cloudflare Access headers go only to the write host.
+- **Secrets never appear** in logs, errors, `/config`, the audit log, or any response.
+- **Submitting:**
+  1. Simulate with `eth_call` from the relayer. A revert returns `refused`, with the decoded custom error, and sends nothing.
+  2. Sign an EIP-1559 transaction for chain 852:
+     - gas = estimate × 1.25;
+     - `maxFeePerGas = min(cap, 2 × baseFee + priority)`.
+  3. Send it, and poll the sequencer for the receipt for up to 30 s.
+  4. The result is `confirmed` (status 1), `reverted` (status 0) or `pending`.
+  - Nonces come from the sequencer's `pending` count, through one serialized queue, so concurrent submissions never share a nonce.
+  - A `pending` result is not a failure. The caller reconciles later with `receipt(hash)` (PRD: retried and reconciled, never treated as a final rejection by itself).
+- **Monitoring:** a relayer balance below 0.001 ETH shows as a warning in the chain status. `/config` shows the chain status with no secret.
+
 ## Interface contracts
 
 A contract is the surface other tasks build on. The task named as owner publishes it; later
@@ -866,3 +907,21 @@ Solidity 0.8.28, `evm_version = cancun`. OpenZeppelin v5: `Ownable2Step`, `Pausa
   - Disputes stay off-chain.
 
 **Events** carry only `bytes32` ids, `companyKey`, signer address, version or sequence numbers, states, and commitments. They carry no prices, quantities or names.
+
+### C-15 — Chain client module (owner: T13; implements D-24, D-26; consumed by T14–T16)
+
+`lib/chain/index.js` exports `createChain({ config, deployment, fetchImpl, now })`. The returned object has:
+
+- **`status()`:** returns `{ state, reason, chainId, address, relayer, registrar, relayerBalanceWei, lowBalance }`.
+  - `state` is `disabled`, `checking`, `ready`, `degraded` or `misconfigured`.
+  - It never includes a secret.
+- **`typed.digest(type, message)`:** returns the 0x-hex EIP-712 digest for one of the eight C-14 types, using the deployed domain.
+- **`typed.recover(type, message, signature)`:** returns the signer's address, or `null`. It follows OpenZeppelin `tryRecover`'s rules: a 65-byte signature, `v` of 27 or 28, low `s`, and a non-zero result.
+- **`registrarSign(message)`:** signs a `Binding` message with the registrar key. It is the only signing the registrar does.
+- **`submit(fn, args)`:** `fn` is one of the nine C-14 record functions, with positional arguments in C-14 order (signatures as 0x-hex).
+  - It resolves to `{ state, hash?, nonce?, error?: { name, args } }`.
+  - `state` is `refused`, `pending`, `confirmed` or `reverted`, per D-26.
+- **`receipt(hash)`:** resolves to `{ state, blockNumber? }`, with `state` = `pending`, `confirmed` or `reverted`.
+- **`call(fn, args)`:** a decoded read of the contract's view functions.
+
+`contracts/abi/OceanRelayLedger.json` holds the committed ABI, generated from `forge build`. The ABI-encoding and error-decoding modules use it.
