@@ -6,7 +6,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test \"test/*.test.js\""
+    "test": "node --test \"test/*.test.js\"",
+    "test:chain": "node --test --test-timeout 180000 \"test/anvil/*.test.js\""
   },
   "engines": {
     "node": "26.x"
