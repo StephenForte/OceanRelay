@@ -129,6 +129,25 @@ function fakeTimers() {
   };
 }
 
+function pendingReads(mock) {
+  return mock.reads().filter((call) => call.method === "eth_getTransactionCount");
+}
+
+function clocked() {
+  let clock = 1_000;
+  const timers = fakeTimers();
+  return {
+    timers,
+    options: {
+      timers,
+      now: () => clock,
+      advance(ms) {
+        clock += ms;
+      },
+    },
+  };
+}
+
 const errorLines = [];
 const originalError = console.error;
 
@@ -285,5 +304,76 @@ describe("chain submitter", () => {
     assert.equal(result.hash, mock.acceptedHashes()[0]);
     assert.equal(result.nonce, 7);
     assert.equal(chain.status().state, "ready");
+    const reads = pendingReads(mock).length;
+    const next = await chain.submit("markExpired", [OFFER]);
+    assert.equal(next.state, "confirmed");
+    assert.equal(next.nonce, 8);
+    assert.equal(pendingReads(mock).length, reads);
+  });
+
+  it("reuses the nonce when the send never reaches the node", async () => {
+    const relayer = openKey(RELAYER_KEY);
+    const registrar = openKey(REGISTRAR_KEY);
+    const mock = createMockChain({ relayer: relayer.address, registrar: registrar.address });
+    const time = clocked();
+    const chain = await readyChain(mock, time.options);
+    mock.setNonce(7);
+    mock.dropNextSend();
+    const lost = await chain.submit("markExpired", [OFFER]);
+    assert.equal(lost.state, "pending");
+    assert.equal(lost.nonce, 7);
+    assert.equal(lost.hash, localHash(rawTransactions(mock)[0]));
+    assert.equal(mock.acceptedHashes().length, 0);
+    assert.equal(chain.status().state, "degraded");
+    time.timers.fire();
+    await chain.settled();
+    const follow = [];
+    for (let i = 0; i < 3; i += 1) follow.push(await chain.submit("markExpired", [OFFER]));
+    assert.deepEqual(follow.map((result) => result.state), ["confirmed", "confirmed", "confirmed"]);
+    assert.deepEqual(follow.map((result) => result.nonce), [7, 8, 9]);
+    assert.deepEqual(pendingReads(mock).map((call) => call.params[1]), ["pending", "pending"]);
+  });
+
+  it("reuses the nonce when the write host answers HTTP 429", async () => {
+    const relayer = openKey(RELAYER_KEY);
+    const registrar = openKey(REGISTRAR_KEY);
+    const mock = createMockChain({ relayer: relayer.address, registrar: registrar.address });
+    const time = clocked();
+    const chain = await readyChain(mock, time.options);
+    mock.setNonce(7);
+    mock.failNextSend(429);
+    const lost = await chain.submit("markExpired", [OFFER]);
+    assert.equal(lost.state, "pending");
+    assert.equal(lost.nonce, 7);
+    assert.equal(lost.hash, localHash(rawTransactions(mock)[0]));
+    assert.equal(mock.acceptedHashes().length, 0);
+    time.timers.fire();
+    await chain.settled();
+    const follow = [];
+    for (let i = 0; i < 3; i += 1) follow.push(await chain.submit("markExpired", [OFFER]));
+    assert.deepEqual(follow.map((result) => result.state), ["confirmed", "confirmed", "confirmed"]);
+    assert.deepEqual(follow.map((result) => result.nonce), [7, 8, 9]);
+  });
+
+  it("re-reads the pending count after an accepted send whose reply is lost", async () => {
+    const relayer = openKey(RELAYER_KEY);
+    const registrar = openKey(REGISTRAR_KEY);
+    const mock = createMockChain({ relayer: relayer.address, registrar: registrar.address });
+    const time = clocked();
+    const chain = await readyChain(mock, time.options);
+    mock.setNonce(7);
+    mock.loseNextSend();
+    const lost = await chain.submit("markExpired", [OFFER]);
+    assert.equal(lost.state, "confirmed");
+    assert.equal(lost.nonce, 7);
+    assert.equal(pendingReads(mock).length, 1);
+    time.timers.fire();
+    await chain.settled();
+    const follow = [];
+    for (let i = 0; i < 3; i += 1) follow.push(await chain.submit("markExpired", [OFFER]));
+    assert.deepEqual(follow.map((result) => result.state), ["confirmed", "confirmed", "confirmed"]);
+    assert.deepEqual(follow.map((result) => result.nonce), [8, 9, 10]);
+    assert.equal(pendingReads(mock).length, 2);
+    assert.equal(txFields(rawTransactions(mock)[1])[1], 8n);
   });
 });

@@ -33,9 +33,12 @@ function createMockChain({
   let nonceAfterTooLow = 10n;
   let holdReceipts = false;
   let loseSend = false;
+  let dropSend = false;
+  let httpFault = 0;
   let sendError = null;
   let alreadyKnown = false;
   const accepted = [];
+  const queued = new Map();
   const runtimeCodeHash = keccakHex(hexToBytes(code));
 
   function addressWord(value) {
@@ -53,6 +56,9 @@ function createMockChain({
       return json(failStatus, { jsonrpc: "2.0", id: 1, error: { code: -32000, message: "down" } });
     }
     const result = answer(body.method, body.params || [], target.href);
+    if (result && result.httpStatus) {
+      return { status: result.httpStatus, async text() { return ""; } };
+    }
     if (result && result.error) return json(200, { jsonrpc: "2.0", id: 1, error: result.error });
     return json(200, { jsonrpc: "2.0", id: 1, result });
   }
@@ -100,21 +106,29 @@ function createMockChain({
         return { error: { code: -32000, message: fault.message } };
       }
       const raw = params[0];
-      const hash = keccakHex(hexToBytes(raw));
+      if (dropSend) {
+        dropSend = false;
+        const error = new TypeError("fetch failed");
+        throw error;
+      }
+      if (httpFault) {
+        const status = httpFault;
+        httpFault = 0;
+        return { httpStatus: status };
+      }
       if (alreadyKnown) {
         alreadyKnown = false;
-        remember(hash);
+        remember(raw);
         return { error: { code: -32000, message: "already known" } };
       }
       if (loseSend) {
         loseSend = false;
-        remember(hash);
+        remember(raw);
         const error = new Error("timeout");
         error.name = "TimeoutError";
         throw error;
       }
-      remember(hash);
-      return hash;
+      return remember(raw);
     }
     if (method === "eth_getTransactionReceipt") {
       return receipts.get(params[0]) || null;
@@ -122,12 +136,19 @@ function createMockChain({
     return { error: { code: -32601, message: "method_not_found" } };
   }
 
-  function remember(hash) {
+  function remember(raw) {
+    const hash = keccakHex(hexToBytes(raw));
     accepted.push(hash);
-    if (!holdReceipts) {
-      receipts.set(hash, { status: "0x1", blockNumber: "0x11", transactionHash: hash });
+    queued.set(nonceOf(raw), hash);
+    while (queued.has(pendingNonce)) {
+      const mined = queued.get(pendingNonce);
+      queued.delete(pendingNonce);
+      if (!holdReceipts) {
+        receipts.set(mined, { status: "0x1", blockNumber: "0x11", transactionHash: mined });
+      }
+      pendingNonce += 1n;
     }
-    pendingNonce += 1n;
+    return hash;
   }
 
   function json(status, body) {
@@ -167,6 +188,7 @@ function createMockChain({
     },
     setNonce(next) {
       pendingNonce = BigInt(next);
+      queued.clear();
     },
     setNonceTooLow(times, next = 10n) {
       nonceTooLowLeft = times;
@@ -177,6 +199,12 @@ function createMockChain({
     },
     loseNextSend() {
       loseSend = true;
+    },
+    dropNextSend() {
+      dropSend = true;
+    },
+    failNextSend(status) {
+      httpFault = status;
     },
     rejectNextSend(message, nextNonce) {
       sendError = { message, nextNonce: nextNonce == null ? null : BigInt(nextNonce) };
@@ -197,6 +225,41 @@ function createMockChain({
       return calls.filter((call) => call.url === writeUrl);
     },
   };
+}
+
+function nonceOf(raw) {
+  const bytes = hexToBytes(raw);
+  const list = rlpItem(bytes, 1);
+  const chainId = rlpItem(bytes, list.start);
+  const nonce = rlpItem(bytes, chainId.next);
+  let value = 0n;
+  for (let i = nonce.start; i < nonce.end; i += 1) value = (value << 8n) + BigInt(bytes[i]);
+  return value;
+}
+
+function rlpItem(bytes, offset) {
+  const prefix = bytes[offset];
+  if (prefix < 0x80) return { start: offset, end: offset + 1, next: offset + 1 };
+  if (prefix <= 0xb7) {
+    const len = prefix - 0x80;
+    return { start: offset + 1, end: offset + 1 + len, next: offset + 1 + len };
+  }
+  if (prefix <= 0xbf) {
+    const size = prefix - 0xb7;
+    let len = 0;
+    for (let i = 0; i < size; i += 1) len = (len * 256) + bytes[offset + 1 + i];
+    const start = offset + 1 + size;
+    return { start, end: start + len, next: start + len };
+  }
+  if (prefix <= 0xf7) {
+    const len = prefix - 0xc0;
+    return { start: offset + 1, end: offset + 1 + len, next: offset + 1 + len };
+  }
+  const size = prefix - 0xf7;
+  let len = 0;
+  for (let i = 0; i < size; i += 1) len = (len * 256) + bytes[offset + 1 + i];
+  const start = offset + 1 + size;
+  return { start, end: start + len, next: start + len };
 }
 
 module.exports = { createMockChain };
