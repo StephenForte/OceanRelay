@@ -1015,6 +1015,36 @@ This section holds what previously lived only in the planning conversation. It i
   re-created on the next push. **Open its PR in the same step as the push**; the operator
   noticed it as a "stray branch" when a push had no PR.
 
+### Environment facts added 2026-10-07 (Phase 5 sessions)
+
+- **Render, read through the Render API** (workspace "Supa Workspace", `tea-d98533l7vvec738vva90`; the operator approved read-only use):
+  - service `OceanRelay`, `srv-daqsg7rncjis73b76upg`;
+  - runtime **python** (the image has Node); build command `npm install`, start command `npm start`;
+  - auto-deploy on commit to main; disk `/var/data` (1 GB).
+  - Node comes from `engines`: 26.10.0, then 26.11.0. T13 pins it to 26.x (D-26).
+  - The sequencer, replica and explorer are also Render services in the same workspace.
+- **Planner tooling on the Mac:**
+  - Foundry 1.8.5 is in `~/.foundry/bin` and is **not on the planner shell's PATH**. Prefix with `export PATH=$HOME/.foundry/bin:$PATH`.
+  - `python3` is broken ("Bad CPU type"), so use Node.
+  - Never splice docs with `String.replace` (see above).
+  - The scratch directory can be wiped mid-session. Re-create probes from the plan's descriptions.
+- **Operator deploy setup:**
+  - a fresh clone at `~/oceanrelay-deploy`;
+  - Foundry keystore accounts `owner` (`0x0Ac2B0d0A4Eb9d223633B91e03F79971DB953C20`), `relayer` (`0xf8B8B3b58ebaC9fC530D9244C22f391E90CC8ae2`) and `registrar` (`0x32b2231464F99B81f5fcffbbA66b99fdA97bB116`);
+  - each `cast wallet address --account X` asks for **X**'s password;
+  - new Terminal windows lose Foundry from PATH.
+- **Funding chain 852:**
+  - by Sepolia deposit only, through L1StandardBridge `0x113AAd08047E9a9B1556627A658f87F0EbEf85a7` with `depositETHTo(addr, 200000, 0x)`, using the public Sepolia RPC `https://ethereum-sepolia-rpc.publicnode.com`;
+  - balances on 2026-10-07: relayer 0.01 ETH, owner about 0.002 ETH.
+  - Measured costs: deploy 3.34M gas, about 0.0000033 ETH; the largest record call about 134k gas, about 0.00000013 ETH.
+- **Cloudflare Access:** the direct test is `curl` with the two headers, which should return HTTP 200 and `0x354`. A 403 meant the values were mistyped; pasting fixed it.
+- **O-11** (after T13 merges): the operator adds to Render `OCEANRELAY_RELAYER_KEY`, `OCEANRELAY_REGISTRAR_KEY`, `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET`. The keys are printed once with `cast wallet private-key --account <name>`. Healthy means `/config` shows `chain.state: "ready"`. The owner key never goes to Render.
+- **Planner review method for chain work, used for T12:**
+  - recompute the vectors in Node from the **C-14 text**, and recover signers through the `ecrecover` precompile on anvil;
+  - mutation-test the contract guards;
+  - dry-run deploy on anvil;
+  - after a real deploy, check the receipt, `keccak(getCode)`, the roles and the domain separator on the sequencer.
+
 ### Open work after T6
 
 - **T7:** post-acceptance statuses (carrier-pending, confirmed, rejected, rolled,
