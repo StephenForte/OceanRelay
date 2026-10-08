@@ -537,7 +537,7 @@ Neither the planner nor any worker handles a private key.
   - A `pending` result is not a failure. The caller reconciles later with `receipt(hash)` (PRD: retried and reconciled, never treated as a final rejection by itself).
 - **Monitoring:** a relayer balance below 0.001 ETH shows as a warning in the chain status. `/config` shows the chain status with no secret.
 
-### D-27 — Wallet binding: how a company binds a wallet (2026-10-08)
+### D-27 — Wallet binding: how a company binds a wallet (2026-10-08) — *amended 2026-10-08: the script switches the wallet to chain 852 before signing*
 
 **Facts it rests on** (planner, 2026-10-08, against `main` at `efba765`):
 - `bindWallet` needs two signatures over one `Binding` digest: the wallet's and the registrar's.
@@ -583,7 +583,7 @@ Neither the planner nor any worker handles a private key.
 - **The script:**
   - `/assets/wallet.js` is plain JavaScript with no library and no inline script;
   - it is included only on `/wallet`, and only when a binding is possible;
-  - it calls `eth_requestAccounts` and then `eth_signTypedData_v4` with the C-14 `Binding` type and the deployed domain, and posts the result in an ordinary form;
+  - it calls `eth_requestAccounts`, then puts the wallet on the deployed chain (`wallet_switchEthereumChain` with `0x354`; on error 4902, `wallet_addEthereumChain` with chain name "ForteL2 Sepolia", currency ETH with 18 decimals, the public sequencer RPC and the explorer), then calls `eth_signTypedData_v4` with the C-14 `Binding` type and the deployed domain, and posts the result in an ordinary form. *Amended 2026-10-08, in the T14 review:* MetaMask refuses `eth_signTypedData_v4` when `domain.chainId` is not the wallet's active chain (`MetaMask/core`, `packages/signature-controller/src/utils/validation.ts`: "Provided chainId … must match the active chainId"). The T14 prompt's claim that the user never switches network was the planner's error. The user still needs no ETH: the wallet only signs, and the relayer sends;
   - without a browser wallet, or without JavaScript, the page explains what is needed and binds nothing.
   - `/wallet` sends `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`. Every other page stays script-free.
 - **Out of scope:**
