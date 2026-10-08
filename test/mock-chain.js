@@ -25,6 +25,7 @@ function createMockChain({
   const calls = [];
   const receipts = new Map();
   let pendingNonce = 0n;
+  let reportedChainId = chainId;
   let failReads = false;
   let failStatus = 503;
   let revertData = null;
@@ -57,7 +58,7 @@ function createMockChain({
     if (href === writeUrl && method !== "eth_sendRawTransaction") {
       return { error: { code: -32601, message: "write_method" } };
     }
-    if (method === "eth_chainId") return "0x" + chainId.toString(16);
+    if (method === "eth_chainId") return "0x" + reportedChainId.toString(16);
     if (method === "eth_getBlockByNumber") {
       const which = params[0];
       if (which === "0x0") return { hash: genesisHash, number: "0x0" };
@@ -124,6 +125,9 @@ function createMockChain({
     address,
     setBalance(next) {
       balance = next;
+    },
+    setReportedChainId(next) {
+      reportedChainId = next;
     },
     setPaused(next) {
       paused = next;

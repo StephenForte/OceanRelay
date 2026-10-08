@@ -1,5 +1,7 @@
 const http = require("node:http");
 const { loadConfig, publicConfig } = require("./lib/config");
+const { createChain } = require("./lib/chain");
+const deployment = require("./deployments/fortel2-sepolia.json");
 const { openStore } = require("./lib/store");
 const { openRecords } = require("./lib/records");
 const { createRouter } = require("./lib/router");
@@ -227,9 +229,13 @@ function createServer({ config, store, records = null, fetchImpl = globalThis.fe
     }
   }
 
+  const chain = createChain({ config, deployment, fetchImpl });
+  chain.start();
+
   const deps = {
     config,
     store,
+    chain,
     records: activeRecords,
     rn,
     render: renderPage,
