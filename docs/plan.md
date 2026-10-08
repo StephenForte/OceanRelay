@@ -135,7 +135,7 @@ Tasks, in order. Each runs after the previous one merges.
 | O-10 | **The operator deployed** OceanRelayLedger to chain 852 on 2026-10-07: address `0x481175bC15eE6e22EAB97176540a98aB6a2925eF`, transaction `0x8e80…c9c3`, block 1991782. Recorded in `deployments/fortel2-sepolia.json`. The relayer is funded with 0.01 ETH and the owner has 0.002 ETH left, both deposited from Sepolia through L1StandardBridge `0x113A…85a7`. | operator | — | **done 2026-10-07**; planner verified (§7) |
 | T13 | Chain client (C-15, D-26): read and write RPCs, relayer EIP-1559 signing and registrar EIP-712 signing (`@noble/*`, exact pins, lockfile), sequencer receipts, the refused/pending/confirmed/reverted model, startup checks against `deployments/fortel2-sepolia.json`, `/config` chain status, Node pinned to 26.x, F-17 README fixes. It must match T12's vectors byte for byte. | `lib/chain/**`, `contracts/abi/` | strongest | **merged 2026-10-08**: PR #51 at `d310ee2` (merge `efba765`), after three rounds (§6). Prompt: `docs/prompts/T13-chain-client.md`. |
 | O-11 | **The operator added** the 4 chain secrets to Render. `/config` shows `chain.state: "ready"`, and the Access values were tested from the Render Shell (HTTP 200). | operator | — | **done 2026-10-08**; planner verified (§7) |
-| T14 | Wallet binding (D-27, C-16): `/wallet` with the wallet-page script and its CSP (D-25), the EIP-712 `Binding` signed in the browser and co-signed by the registrar, records schema 5 (`companies`), and the `wallet.bound` audit event | `lib/routes/wallet.js`, `lib/views/wallet.js`, the script | **strongest** (raised from strong: a migration, the authorization boundary T15 relies on, and the first page script) | **in review**: PR #53 round 1 `9bb5a98`, changes requested 2026-10-08 (MetaMask needs the wallet on chain 852; the planner's error; §6). Prompt: `docs/prompts/T14-wallet-binding.md`. |
+| T14 | Wallet binding (D-27, C-16): `/wallet` with the wallet-page script and its CSP (D-25), the EIP-712 `Binding` signed in the browser and co-signed by the registrar, records schema 5 (`companies`), and the `wallet.bound` audit event | `lib/routes/wallet.js`, `lib/views/wallet.js`, the script | **strongest** (raised from strong: a migration, the authorization boundary T15 relies on, and the first page script) | **approved 2026-10-08**: PR #53 at `e41aff8`, after two rounds (§6). Prompt: `docs/prompts/T14-wallet-binding.md`. |
 | T15 | Publish, version, state, request, acceptance, status and cancellation recorded on chain, with pending, confirmed and failed shown in the UI | — | strongest | after T14 |
 | T16 | Operator reconciliation: compare the records with chain events and flag mismatches; a repair is an audited correction | — | strong | after T15 |
 | A-5 | Phase 5 acceptance on the deployed service | operator | — | after T16 |
@@ -796,6 +796,18 @@ The operator merged #32 by accident before the planner review. The review then r
   - **Fix shown to work** on a patched copy of the script: call `wallet_switchEthereumChain` with `0x354`; on 4902, call `wallet_addEthereumChain`; then sign. The calls were then `eth_requestAccounts,wallet_switchEthereumChain,wallet_addEthereumChain,eth_signTypedData_v4`, and the bind was confirmed.
 - **Disclosed by the worker, not blocking:** an expiry by the check can race a still-running submit, so the chain is bound while the records say `expired`. It heals itself: `expired` is not active, so binding the same wallet again takes the own-key `WalletAlreadyBound` path to `confirmed`.
 - **Not verified:** a real browser wallet. A-5 covers it on the deployed service.
+
+**T14 round 2, `e41aff8`: approved 2026-10-08**
+- **Base and scope:** merge-base `6774435` = `main` (after #54). Round 2 touches `lib/assets/wallet.js`, `lib/views/wallet.js`, the README sentence, and three test files. `test/anvil/lifecycle.test.js` was not on the round-2 list, but only its fake provider changed, to answer the switch call. That is declared, and it is test-only.
+- **Gate** (planner, scratch clone): `npm test` 261/0/0; `test:chain` 3/3; `forge test` 84; no anvil left running. CI on `e41aff8`: Semgrep, Trivy and Bugbot pass.
+- **Probes** (the round-1 harness, re-run unchanged):
+  - **MetaMask-like wallet on chain 1, with 852 unknown:** the calls are `eth_requestAccounts,wallet_switchEthereumChain,wallet_addEthereumChain,eth_signTypedData_v4`, and the form is submitted. In round 1 it failed.
+  - **Wallet already on 852:** submitted.
+  - **The script's typed data, signed by `cast`:** `bound`, `confirmed`.
+  - Reads, order, the relayer refusal and concurrency all pass as in round 1.
+  - **A rejected switch (4001), and a rejected add:** "The wallet did not switch to this chain.", with no sign and no submit.
+  - The add parameters come from the page's `data-chain`, as D-27 as amended requires.
+- **Not verified:** a real browser wallet. A-5 covers it on the deployed service, so the first real bind should be watched. MetaMask may show a warning that chain 852 is unknown; that is expected.
 
 ---
 
