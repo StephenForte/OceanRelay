@@ -537,6 +537,61 @@ Neither the planner nor any worker handles a private key.
   - A `pending` result is not a failure. The caller reconciles later with `receipt(hash)` (PRD: retried and reconciled, never treated as a final rejection by itself).
 - **Monitoring:** a relayer balance below 0.001 ETH shows as a warning in the chain status. `/config` shows the chain status with no secret.
 
+### D-27 — Wallet binding: how a company binds a wallet (2026-10-08)
+
+**Facts it rests on** (planner, 2026-10-08, against `main` at `efba765`):
+- `bindWallet` needs two signatures over one `Binding` digest: the wallet's and the registrar's.
+  - On success it sets `walletCompany[wallet] = companyKey`, readable through the view `walletCompany(address)`.
+  - A wallet that is already bound, to any company, reverts with `WalletAlreadyBound(wallet, existingKey)`. Re-binding to the same company therefore reverts with the company's own key.
+- The contract does not stop the relayer's or the registrar's address from being bound. The registrar is refused only as a duplicate signer.
+- Phase 4 guarantees that reads never write. D-25 allows one first-party script, on wallet pages only.
+- `chain.call` looks functions up by name in the committed ABI, so `walletCompany` is callable. T14 confirms this.
+
+**Rules:**
+- **`companyKey`:**
+  - 32 random bytes, generated once per company on its first binding POST (never on a GET) and stored in the records file;
+  - never derived from the Rate Ninja company id: an unsalted hash of a small id space can be reversed;
+  - never changed afterwards;
+  - not secret, because it appears in chain events, but only the records file links it to a company.
+- **Who may bind:** any signed-in user with a usable identity, for their own company. The user's `sub` is recorded off-chain (PRD: the address is bound to the user and the company). The contract binds to the company only.
+- **Refused before anything is sent, and nothing is written:**
+  - the relayer's or the registrar's address. If the relayer were bound to a company, the relayer key alone could sign as that company, breaking D-24;
+  - a signature that does not recover to the posted wallet;
+  - a deadline outside (now, now + 15 min]. The page proposes now + 10 min;
+  - a fifth wallet: a company holds at most 5 wallets that are `submitting`, `pending` or `confirmed`;
+  - a second binding while one is `submitting` or `pending` for the company;
+  - a wallet that is already `submitting`, `pending` or `confirmed` for the company;
+  - the chain not `ready`.
+- **Order, for crash safety:**
+  1. a records transaction adds the entry as `submitting`;
+  2. `registrarSign`;
+  3. `submit("bindWallet", …)`;
+  4. a records transaction applies the result.
+  A crash between steps 1 and 4 leaves `submitting`, which the check resolves.
+- **Mapping the submit result:**
+  - `confirmed` → `confirmed`, and the audit entry `wallet.bound`;
+  - `pending` → `pending`, with the hash;
+  - `reverted` → `reverted`;
+  - `refused` with `WalletAlreadyBound` and the company's own key → `confirmed` (it already was), plus `wallet.bound`;
+  - `refused` with `WalletAlreadyBound` and another key → `refused`. The screen says the wallet belongs to another company, without naming it;
+  - any other `refused` → `refused`, with the error name.
+- **The check (`POST /wallet/check`)** resolves the company's `submitting` and `pending` entries:
+  - with a hash: `receipt(hash)`;
+  - without a hash, or once the deadline is more than 2 minutes past: `walletCompany(wallet)`. If it equals the company's key, the entry is `confirmed` (plus `wallet.bound`); otherwise, once the deadline has passed, `expired`. An expired signature can no longer be used on chain, so finalizing it is safe;
+  - otherwise the entry is left as it is.
+- **Reads:** `GET /wallet` never writes and makes no RPC call; `chain.status()` is in memory. The submit's own 30-second wait confirms most bindings within the POST.
+- **The script:**
+  - `/assets/wallet.js` is plain JavaScript with no library and no inline script;
+  - it is included only on `/wallet`, and only when a binding is possible;
+  - it calls `eth_requestAccounts` and then `eth_signTypedData_v4` with the C-14 `Binding` type and the deployed domain, and posts the result in an ordinary form;
+  - without a browser wallet, or without JavaScript, the page explains what is needed and binds nothing.
+  - `/wallet` sends `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`. Every other page stays script-free.
+- **Out of scope:**
+  - unbinding: only the owner can call `revokeWallet`;
+  - requiring a wallet for publish and accept: T15;
+  - an operator view of the bindings: T16.
+- **Chain not ready:** `/wallet` says binding is unavailable and includes no script, and the POSTs refuse without writing. Nothing else in the marketplace changes.
+
 ## Interface contracts
 
 A contract is the surface other tasks build on. The task named as owner publishes it; later
@@ -925,3 +980,42 @@ Solidity 0.8.28, `evm_version = cancun`. OpenZeppelin v5: `Ownable2Step`, `Pausa
 - **`call(fn, args)`:** a decoded read of the contract's view functions.
 
 `contracts/abi/OceanRelayLedger.json` holds the committed ABI, generated from `forge build`. The ABI-encoding and error-decoding modules use it.
+
+### C-16 — Company wallets, schema v5 (owner: T14; implements D-27; extends C-12; consumed by T15 and T16)
+
+**Records file, schema 5.** A new top-level object; nothing else changes.
+
+```
+companies: {
+  [companyId]: {
+    companyKey: "0x" + 64 hex,          // D-27; random, never changes
+    createdAt: ISO,
+    wallets: [ {
+      wallet: EIP-55 address,
+      boundBy: sub,
+      state: "submitting" | "pending" | "confirmed" | "reverted" | "refused" | "expired",
+      deadline: integer (unix seconds),
+      txHash: "0x" + 64 hex | null,
+      error: C-14 error name | null,
+      createdAt: ISO, updatedAt: ISO
+    } ]
+  }
+}
+```
+
+- **Migration 4 → 5:** add `companies: {}`, back up the v4 file first (following the existing `M4_BAK_SUFFIX` pattern), and read schema 1–5. A schema above 5 is refused, as before.
+- **For T15 and T16:** `records.companyKeyFor(companyId)` returns the key or `null`; `records.walletsFor(companyId)` returns a copy of the list. A wallet is usable for signing only when it is `confirmed`.
+
+**Routes:**
+- `GET /wallet`: signed in. It lists the company's wallets with their states, and shows the chain's state.
+- `POST /wallet/prepare`: creates the `companyKey` if it is missing, then redirects (303) to `/wallet`.
+- `POST /wallet/bind`: fields `csrf_token`, `wallet`, `deadline` and `signature`. Then 303 to `/wallet`.
+- `POST /wallet/check`: runs D-27's check, then 303 to `/wallet`.
+- `GET /assets/wallet.js`: `application/javascript; charset=utf-8`, `nosniff`, with the stylesheet's caching rules.
+
+All POSTs need the session's CSRF token. A request that is not signed in gets what the other signed-in pages give.
+
+**Extension to C-12:** a new event, `wallet.bound`:
+- actor role `user`;
+- `subject.wallet` is the EIP-55 address. It is a new subject key, validated as `0x` plus 40 hex characters;
+- no `detail`.
