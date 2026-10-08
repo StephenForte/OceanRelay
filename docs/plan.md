@@ -133,7 +133,8 @@ Tasks, in order. Each runs after the previous one merges.
 | --- | --- | --- | --- | --- |
 | T12 | OceanRelayLedger contract, Foundry tests, deploy script, EIP-712 test vectors, contracts CI (C-14) | `contracts/**`, `.github/workflows/contracts.yml` | strongest | **merged 2026-10-06, PR #47 at `113c8f4`** (review in §6) |
 | O-10 | **The operator deployed** OceanRelayLedger to chain 852 on 2026-10-07: address `0x481175bC15eE6e22EAB97176540a98aB6a2925eF`, transaction `0x8e80…c9c3`, block 1991782. Recorded in `deployments/fortel2-sepolia.json`. The relayer is funded with 0.01 ETH and the owner has 0.002 ETH left, both deposited from Sepolia through L1StandardBridge `0x113A…85a7`. | operator | — | **done 2026-10-07**; planner verified (§7) |
-| T13 | Chain client (C-15, D-26): read and write RPCs, relayer EIP-1559 signing and registrar EIP-712 signing (`@noble/*`, exact pins, lockfile), sequencer receipts, the refused/pending/confirmed/reverted model, startup checks against `deployments/fortel2-sepolia.json`, `/config` chain status, Node pinned to 26.x, F-17 README fixes. It must match T12's vectors byte for byte. | `lib/chain/**`, `contracts/abi/` | strongest | **approved 2026-10-07**: PR #51 at `d310ee2`, after three rounds (§6). Prompt: `docs/prompts/T13-chain-client.md`. After merge, O-11: the operator adds the 4 secrets in Render. |
+| T13 | Chain client (C-15, D-26): read and write RPCs, relayer EIP-1559 signing and registrar EIP-712 signing (`@noble/*`, exact pins, lockfile), sequencer receipts, the refused/pending/confirmed/reverted model, startup checks against `deployments/fortel2-sepolia.json`, `/config` chain status, Node pinned to 26.x, F-17 README fixes. It must match T12's vectors byte for byte. | `lib/chain/**`, `contracts/abi/` | strongest | **merged 2026-10-08**: PR #51 at `d310ee2` (merge `efba765`), after three rounds (§6). Prompt: `docs/prompts/T13-chain-client.md`. |
+| O-11 | **The operator added** the 4 chain secrets to Render. `/config` shows `chain.state: "ready"`, and the Access values were tested from the Render Shell (HTTP 200). | operator | — | **done 2026-10-08**; planner verified (§7) |
 | T14 | Wallet binding: the wallet-page script (D-25), the EIP-712 `Binding`, and the binding record and screens | — | strong | after T13 |
 | T15 | Publish, version, state, request, acceptance, status and cancellation recorded on chain, with pending, confirmed and failed shown in the UI | — | strongest | after T14 |
 | T16 | Operator reconciliation: compare the records with chain events and flag mismatches; a repair is an audited correction | — | strong | after T15 |
@@ -995,6 +996,24 @@ The operator reported every step passed:
   - it does not explain that the public RPC refuses transactions, so ETH arrives by bridge deposit.
   - **F-17:** fix the README. Fold this into T13, which touches the README for the new env vars.
 
+### 2026-10-08 — O-11: chain secrets added to Render (operator), verified by the planner
+
+- **What the operator did** (planner's step-by-step):
+  - copied each keystore key to the clipboard with `cast wallet private-key --account <name> | pbcopy`, so it was never printed. The planner tested this on a throwaway keystore: stdout holds only the 66-character key plus a newline, the password prompt goes to the terminal, and the config trims the newline;
+  - cleared the clipboard;
+  - added the four variables in Render and saved with a deploy.
+- **Planner checks:**
+  - `GET /config` on the deployed service shows `chain.state: "ready"`, reason null;
+  - relayer `0xf8B8…8ae2` and registrar `0x32b2…B116`, matching the keystore accounts and the deployment;
+  - `relayerBalanceWei` 10000000000000000 (0.01 ETH, also read on chain); `lowBalance` false;
+  - the four secrets show only as `set`, and no secret value appears anywhere in `/config`.
+- **The Access values in Render, tested with Render's own copies:**
+  - a `node -e` fetch, run from the Render **Shell**, sent `eth_sendRawTransaction(["0x"])` to the write host;
+  - it returned HTTP 200 with `{"error":{"code":-32602,"message":"empty transaction data"}}`, so Cloudflare let the request through;
+  - wrong values return HTTP 403 with Cloudflare's HTML error page. The planner checked that case with fake values.
+  - This check matters because `ready` alone does not prove the Access values: D-26's startup check never contacts the write host.
+- Phase 5 can now send transactions from the deployed service. T14 is next.
+
 ---
 
 ## 8. Planner working notes (for the next session)
@@ -1082,7 +1101,11 @@ This section holds what previously lived only in the planning conversation. It i
   - balances on 2026-10-07: relayer 0.01 ETH, owner about 0.002 ETH.
   - Measured costs: deploy 3.34M gas, about 0.0000033 ETH; the largest record call about 134k gas, about 0.00000013 ETH.
 - **Cloudflare Access:** the direct test is `curl` with the two headers, which should return HTTP 200 and `0x354`. A 403 meant the values were mistyped; pasting fixed it.
-- **O-11** (after T13 merges): the operator adds to Render `OCEANRELAY_RELAYER_KEY`, `OCEANRELAY_REGISTRAR_KEY`, `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET`. The keys are printed once with `cast wallet private-key --account <name>`. Healthy means `/config` shows `chain.state: "ready"`. The owner key never goes to Render.
+- **O-11 is done** (2026-10-08, §7). To re-check later:
+  - `/config` must show `chain.state` `ready`.
+  - `ready` does not prove the Access values. Test those from the OceanRelay **Shell** in Render (a paid instance, `0.5c-512mb`) by sending `eth_sendRawTransaction(["0x"])` to the write host. The good answer is HTTP 200 with -32602 "empty transaction data"; HTTP 403 means a bad value.
+  - `cast wallet private-key --account X | pbcopy` copies a key without printing it.
+  - The owner key never goes to Render.
 - **Planner review method for chain work, used for T12:**
   - recompute the vectors in Node from the **C-14 text**, and recover signers through the `ecrecover` precompile on anvil;
   - mutation-test the contract guards;
