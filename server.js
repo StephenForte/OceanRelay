@@ -15,8 +15,9 @@ const offerRoutes = require("./lib/routes/offers");
 const marketRoutes = require("./lib/routes/market");
 const requestRoutes = require("./lib/routes/requests");
 const operatorRoutes = require("./lib/routes/operator");
+const walletRoutes = require("./lib/routes/wallet");
 
-const areas = [systemRoutes, connectRoutes, offerRoutes, marketRoutes, requestRoutes, operatorRoutes];
+const areas = [systemRoutes, connectRoutes, offerRoutes, marketRoutes, requestRoutes, operatorRoutes, walletRoutes];
 
 const accessTokens = new Map();
 const refreshInflight = new Map();
@@ -40,17 +41,21 @@ function sendJson(res, status, body) {
   res.end(payload);
 }
 
-function sendHtml(res, status, html, cookies = []) {
-  res.writeHead(status, securityHeaders({
+function sendHtml(res, status, html, cookies = [], extraHeaders) {
+  const headers = {
     "Content-Type": "text/html; charset=utf-8",
     "Content-Length": Buffer.byteLength(html),
     "Set-Cookie": cookies,
-  }));
+  };
+  if (extraHeaders && typeof extraHeaders === "object") {
+    for (const key of Object.keys(extraHeaders)) headers[key] = extraHeaders[key];
+  }
+  res.writeHead(status, securityHeaders(headers));
   res.end(html);
 }
 
-function redirect(res, location, cookies = []) {
-  res.writeHead(302, securityHeaders({ Location: location, "Set-Cookie": cookies }));
+function redirect(res, location, cookies = [], status = 302) {
+  res.writeHead(status, securityHeaders({ Location: location, "Set-Cookie": cookies }));
   res.end();
 }
 
@@ -179,7 +184,14 @@ function ensureAccessToken(sessionId, config, store, fetchImpl, endpoints) {
   return pending;
 }
 
-function createServer({ config, store, records = null, fetchImpl = globalThis.fetch } = {}) {
+function createServer({
+  config,
+  store,
+  records = null,
+  fetchImpl = globalThis.fetch,
+  deployment: deploymentOverride = null,
+  chain: chainOverride = null,
+} = {}) {
   const activeRecords = records || openRecords(null);
   let endpointsPromise;
 
@@ -229,8 +241,12 @@ function createServer({ config, store, records = null, fetchImpl = globalThis.fe
     }
   }
 
-  const chain = createChain({ config, deployment, fetchImpl });
-  chain.start();
+  const chain = chainOverride || createChain({
+    config,
+    deployment: deploymentOverride || deployment,
+    fetchImpl,
+  });
+  if (!chainOverride) chain.start();
 
   const deps = {
     config,

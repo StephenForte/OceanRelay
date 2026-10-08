@@ -161,3 +161,24 @@ The other two variables are the Cloudflare Access service token:
 - `CF_ACCESS_CLIENT_SECRET`
 
 Leave `FORTEL2_READ_RPC`, `FORTEL2_WRITE_RPC`, and `OCEANRELAY_CHAIN_MAX_FEE_GWEI` unset to use the defaults. Saving the variables restarts the service. When the check matches the deployed ledger, `GET /config` shows `"chain": { "state": "ready" }` and does not include a key or an Access secret.
+
+## Binding a wallet
+
+A signed-in user opens `/wallet` to bind a browser wallet to their company. The page lists the company's wallets. Each row shows the address, a state, the date, and, when there is a transaction hash, a link to the explorer.
+
+Prepare creates the company key. It does not send a transaction. Connect and sign asks the browser wallet to sign the binding. The registrar co-signs, and the relayer sends it. The wallet asks to switch to ForteL2 Sepolia, or to add that network if the wallet does not know it. The user still needs no ETH, because the wallet only signs and the relayer sends the transaction. Without a browser wallet, or without JavaScript, the page explains that and binds nothing.
+
+Check pending is the only way a submitting or pending binding moves on. Opening the page does not ask the chain.
+
+A company can have at most five wallets that are submitting, pending, or confirmed, and only one binding in progress. The relayer address and the registrar address cannot be bound.
+
+States:
+
+- **Submitting.** The binding is recorded and is being sent.
+- **Pending.** The transaction was sent and is not confirmed yet. Pending is not a failure.
+- **Confirmed.** The wallet is bound to the company.
+- **Reverted.** The transaction was mined and did not succeed.
+- **Refused.** The chain refused the binding.
+- **Expired.** The deadline passed before the binding was confirmed.
+
+When the chain is not ready, the page says binding is unavailable and offers no action.
