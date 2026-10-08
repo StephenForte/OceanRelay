@@ -1,10 +1,12 @@
 "use strict";
 
-const { describe, it } = require("node:test");
+const { describe, it, before, after } = require("node:test");
 const assert = require("node:assert/strict");
 const { createChain } = require("../lib/chain");
 const { openKey } = require("../lib/chain/keys");
 const { selectorOf } = require("../lib/chain/abi");
+const { keccakHex } = require("../lib/chain/keccak");
+const { hexToBytes } = require("../lib/chain/hex");
 const { keccak_256 } = require("@noble/hashes/sha3.js");
 const { createMockChain } = require("./mock-chain");
 
@@ -104,7 +106,42 @@ function rawTransactions(mock) {
     .map((call) => call.params[0]);
 }
 
+function localHash(raw) {
+  return keccakHex(hexToBytes(raw));
+}
+
+function fakeTimers() {
+  const queue = [];
+  return {
+    setTimeout(fn, ms) {
+      const item = { fn, ms };
+      queue.push(item);
+      return item;
+    },
+    clearTimeout(item) {
+      const index = queue.indexOf(item);
+      if (index >= 0) queue.splice(index, 1);
+    },
+    fire() {
+      const item = queue.shift();
+      if (item) item.fn();
+    },
+  };
+}
+
+const errorLines = [];
+const originalError = console.error;
+
 describe("chain submitter", () => {
+  before(() => {
+    console.error = (...args) => {
+      errorLines.push(args.map(String).join(" "));
+    };
+  });
+  after(() => {
+    console.error = originalError;
+  });
+
   it("gives concurrent submissions distinct nonces and prices the fee", async () => {
     const relayer = openKey(RELAYER_KEY);
     const registrar = openKey(REGISTRAR_KEY);
@@ -184,5 +221,69 @@ describe("chain submitter", () => {
     assert.equal(txFields(raw[0])[1], 3n);
     assert.equal(txFields(raw[1])[1], 9n);
     assert.equal(selectorOf("markExpired").slice(0, 2), "0x");
+  });
+
+  it("returns the local hash when the write host accepts and then times out", async () => {
+    const relayer = openKey(RELAYER_KEY);
+    const registrar = openKey(REGISTRAR_KEY);
+    const mock = createMockChain({ relayer: relayer.address, registrar: registrar.address });
+    const timers = fakeTimers();
+    const chain = await readyChain(mock, { timers });
+    mock.setNonce(7);
+    mock.loseNextSend();
+    const result = await chain.submit("markExpired", [OFFER]);
+    const raw = rawTransactions(mock);
+    assert.notEqual(result.state, "refused");
+    assert.equal(result.hash, localHash(raw[0]));
+    assert.equal(result.hash, mock.acceptedHashes()[0]);
+    assert.equal(result.nonce, 7);
+    assert.equal(result.state, "confirmed");
+    assert.equal(chain.status().state, "degraded");
+    assert.equal(errorLines.join("\n").includes(raw[0]), false);
+    timers.fire();
+    await chain.settled();
+    assert.equal(chain.status().state, "ready");
+    const next = await chain.submit("markExpired", [OFFER]);
+    assert.equal(next.state, "confirmed");
+    assert.equal(next.nonce, 8);
+    assert.equal(txFields(rawTransactions(mock)[1])[1], 8n);
+  });
+
+  it("refuses a definitive rejection and takes the next nonce from the chain", async () => {
+    const relayer = openKey(RELAYER_KEY);
+    const registrar = openKey(REGISTRAR_KEY);
+    const mock = createMockChain({ relayer: relayer.address, registrar: registrar.address });
+    const chain = await readyChain(mock);
+    mock.setNonce(4);
+    mock.rejectNextSend("insufficient funds", 15);
+    const result = await chain.submit("markExpired", [OFFER]);
+    assert.equal(result.state, "refused");
+    assert.equal(result.error.name, "SendFailed");
+    assert.equal(result.hash, undefined);
+    assert.equal(mock.acceptedHashes().length, 0);
+    assert.equal(chain.status().state, "ready");
+    const text = errorLines.join("\n");
+    assert.equal(text.includes("insufficient funds"), false);
+    assert.equal(text.includes(rawTransactions(mock)[0]), false);
+    const next = await chain.submit("markExpired", [OFFER]);
+    assert.equal(next.state, "confirmed");
+    assert.equal(next.nonce, 15);
+    assert.equal(txFields(rawTransactions(mock).at(-1))[1], 15n);
+  });
+
+  it("treats an already-known transaction as sent", async () => {
+    const relayer = openKey(RELAYER_KEY);
+    const registrar = openKey(REGISTRAR_KEY);
+    const mock = createMockChain({ relayer: relayer.address, registrar: registrar.address });
+    const chain = await readyChain(mock);
+    mock.setNonce(7);
+    mock.knowNextSend();
+    const result = await chain.submit("markExpired", [OFFER]);
+    const raw = rawTransactions(mock);
+    assert.notEqual(result.state, "refused");
+    assert.equal(result.hash, localHash(raw[0]));
+    assert.equal(result.hash, mock.acceptedHashes()[0]);
+    assert.equal(result.nonce, 7);
+    assert.equal(chain.status().state, "ready");
   });
 });

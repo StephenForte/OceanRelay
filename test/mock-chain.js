@@ -32,7 +32,10 @@ function createMockChain({
   let nonceTooLowLeft = 0;
   let nonceAfterTooLow = 10n;
   let holdReceipts = false;
-  let sent = 0;
+  let loseSend = false;
+  let sendError = null;
+  let alreadyKnown = false;
+  const accepted = [];
   const runtimeCodeHash = keccakHex(hexToBytes(code));
 
   function addressWord(value) {
@@ -90,18 +93,41 @@ function createMockChain({
         pendingNonce = nonceAfterTooLow;
         return { error: { code: -32000, message: "nonce too low" } };
       }
-      sent += 1;
-      const hash = "0x" + sent.toString(16).padStart(64, "0");
-      if (!holdReceipts) {
-        receipts.set(hash, { status: "0x1", blockNumber: "0x11", transactionHash: hash });
+      if (sendError) {
+        const fault = sendError;
+        sendError = null;
+        if (fault.nextNonce != null) pendingNonce = fault.nextNonce;
+        return { error: { code: -32000, message: fault.message } };
       }
-      pendingNonce += 1n;
+      const raw = params[0];
+      const hash = keccakHex(hexToBytes(raw));
+      if (alreadyKnown) {
+        alreadyKnown = false;
+        remember(hash);
+        return { error: { code: -32000, message: "already known" } };
+      }
+      if (loseSend) {
+        loseSend = false;
+        remember(hash);
+        const error = new Error("timeout");
+        error.name = "TimeoutError";
+        throw error;
+      }
+      remember(hash);
       return hash;
     }
     if (method === "eth_getTransactionReceipt") {
       return receipts.get(params[0]) || null;
     }
     return { error: { code: -32601, message: "method_not_found" } };
+  }
+
+  function remember(hash) {
+    accepted.push(hash);
+    if (!holdReceipts) {
+      receipts.set(hash, { status: "0x1", blockNumber: "0x11", transactionHash: hash });
+    }
+    pendingNonce += 1n;
   }
 
   function json(status, body) {
@@ -148,6 +174,18 @@ function createMockChain({
     },
     setHoldReceipts(next) {
       holdReceipts = next;
+    },
+    loseNextSend() {
+      loseSend = true;
+    },
+    rejectNextSend(message, nextNonce) {
+      sendError = { message, nextNonce: nextNonce == null ? null : BigInt(nextNonce) };
+    },
+    knowNextSend() {
+      alreadyKnown = true;
+    },
+    acceptedHashes() {
+      return accepted.slice();
     },
     addReceipt(hash, receipt) {
       receipts.set(hash, receipt);
