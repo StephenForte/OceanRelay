@@ -173,11 +173,13 @@ describe("M-4 migration", () => {
       assert.deepEqual(fs.readFileSync(bak), original);
       assert.equal(mode(bak), 0o600);
       const v4 = JSON.parse(fs.readFileSync(recordsPath, "utf8"));
-      assert.equal(v4.schemaVersion, 4);
+      assert.equal(v4.schemaVersion, 5);
+      assert.deepEqual(v4.companies, {});
       const rest = (data) => {
         const copy = { ...data };
         delete copy.schemaVersion;
         delete copy.requests;
+        delete copy.companies;
         return JSON.stringify(copy);
       };
       assert.equal(rest(v4), rest(v3));
@@ -195,7 +197,7 @@ describe("M-4 migration", () => {
       const settled = fs.readFileSync(recordsPath);
       const settledBak = fs.readFileSync(bak);
       records.view((data) => {
-        assert.equal(data.schemaVersion, 4);
+        assert.equal(data.schemaVersion, 5);
       });
       openRecords(recordsPath).view((data) => {
         assert.equal(data.requests[acceptedBefore.id].fulfilment.status, "accepted");
@@ -235,7 +237,8 @@ describe("M-4 migration", () => {
       assert.equal(JSON.parse(fs.readFileSync(`${v1Path}.pre-m3.bak`, "utf8")).schemaVersion, 2);
       assert.equal(JSON.parse(fs.readFileSync(`${v1Path}.pre-m4.bak`, "utf8")).schemaVersion, 3);
       const v1Now = JSON.parse(fs.readFileSync(v1Path, "utf8"));
-      assert.equal(v1Now.schemaVersion, 4);
+      assert.equal(v1Now.schemaVersion, 5);
+      assert.deepEqual(v1Now.companies, {});
       assert.equal(v1Now.future.keep, true);
       assert.deepEqual(v1Now.requests, {});
 
@@ -252,7 +255,8 @@ describe("M-4 migration", () => {
       assert.deepEqual(fs.readFileSync(`${v2Path}.pre-m3.bak`), v2);
       assert.equal(JSON.parse(fs.readFileSync(`${v2Path}.pre-m4.bak`, "utf8")).schemaVersion, 3);
       const v2Now = JSON.parse(fs.readFileSync(v2Path, "utf8"));
-      assert.equal(v2Now.schemaVersion, 4);
+      assert.equal(v2Now.schemaVersion, 5);
+      assert.deepEqual(v2Now.companies, {});
       assert.equal(v2Now.offers.a.custom, "café");
       assert.equal(v2Now.future.keep, 2);
 
@@ -271,7 +275,8 @@ describe("M-4 migration", () => {
       openRecords(v3Path);
       assert.equal(fs.readFileSync(`${v3Path}.pre-m4.bak`, "utf8"), "sentinel-m4");
       const migrated = JSON.parse(fs.readFileSync(v3Path, "utf8"));
-      assert.equal(migrated.schemaVersion, 4);
+      assert.equal(migrated.schemaVersion, 5);
+      assert.deepEqual(migrated.companies, {});
       assert.equal(migrated.future.keep, 3);
       assert.equal(JSON.stringify(migrated.offers), JSON.stringify(v3.offers));
       assert.equal(JSON.stringify(withoutFulfilment(migrated.requests.p)), JSON.stringify(pending));
@@ -279,14 +284,15 @@ describe("M-4 migration", () => {
       assert.equal(JSON.stringify(withoutFulfilment(migrated.requests.a)), JSON.stringify(accepted));
       assert.deepEqual(migrated.requests.a.fulfilment, INITIAL);
 
-      const v5Path = path.join(dir, "v5.json");
-      const v5 = JSON.stringify({ schemaVersion: 5, offers: { keep: { qty: 7 } }, requests: {}, audit: ["stay"], future: 1 });
-      fs.writeFileSync(v5Path, v5);
-      assert.throws(() => openRecords(v5Path), /schemaVersion/);
-      assert.equal(fs.readFileSync(v5Path, "utf8"), v5);
-      assert.equal(fs.existsSync(`${v5Path}.pre-m4.bak`), false);
-      assert.equal(fs.existsSync(`${v5Path}.pre-m3.bak`), false);
-      assert.equal(fs.existsSync(`${v5Path}.pre-m2.bak`), false);
+      const v6Path = path.join(dir, "v6.json");
+      const v6 = JSON.stringify({ schemaVersion: 6, offers: { keep: { qty: 7 } }, requests: {}, audit: ["stay"], future: 1 });
+      fs.writeFileSync(v6Path, v6);
+      assert.throws(() => openRecords(v6Path), /schemaVersion/);
+      assert.equal(fs.readFileSync(v6Path, "utf8"), v6);
+      assert.equal(fs.existsSync(`${v6Path}.pre-m5.bak`), false);
+      assert.equal(fs.existsSync(`${v6Path}.pre-m4.bak`), false);
+      assert.equal(fs.existsSync(`${v6Path}.pre-m3.bak`), false);
+      assert.equal(fs.existsSync(`${v6Path}.pre-m2.bak`), false);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

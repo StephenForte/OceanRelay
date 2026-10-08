@@ -15,17 +15,17 @@ function mode(file) {
 }
 
 describe("records store", () => {
-  it("writes a fresh v4 file with mode 0600 when the file is missing", () => {
+  it("writes a fresh v5 file with mode 0600 when the file is missing", () => {
     const dir = tempDir();
     try {
       const file = path.join(dir, "nested", "oceanrelay-records.json");
       const records = openRecords(file);
       assert.equal(records.filePath, file);
       const onDisk = JSON.parse(fs.readFileSync(file, "utf8"));
-      assert.deepEqual(onDisk, { schemaVersion: 4, offers: {}, requests: {}, audit: [] });
+      assert.deepEqual(onDisk, { schemaVersion: 5, offers: {}, requests: {}, audit: [], companies: {} });
       assert.equal(mode(file), 0o600);
       const version = records.transact((data) => data.schemaVersion);
-      assert.equal(version, 4);
+      assert.equal(version, 5);
       assert.equal(mode(file), 0o600);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -46,8 +46,9 @@ describe("records store", () => {
       assert.equal(mode(file), 0o600);
       const again = openRecords(file);
       again.transact((data) => {
-        assert.equal(data.schemaVersion, 4);
+        assert.equal(data.schemaVersion, 5);
         assert.deepEqual(data.requests, {});
+        assert.deepEqual(data.companies, {});
         assert.deepEqual(data.offers.o1, { qty: 4 });
         assert.deepEqual(data.audit, [{ event: "created" }]);
       });
@@ -74,7 +75,8 @@ describe("records store", () => {
       const again = JSON.parse(fs.readFileSync(file, "utf8"));
       assert.equal(again.future.keep, true);
       assert.equal(again.offers.a.qty, 3);
-      assert.equal(again.schemaVersion, 4);
+      assert.equal(again.schemaVersion, 5);
+      assert.deepEqual(again.companies, {});
       assert.deepEqual(again.requests, {});
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -140,17 +142,18 @@ describe("records store", () => {
     }
   });
 
-  it("throws on schemaVersion 5 and does not replace the file", () => {
+  it("throws on schemaVersion 6 and does not replace the file", () => {
     const dir = tempDir();
     try {
       const file = path.join(dir, "records.json");
-      const original = JSON.stringify({ schemaVersion: 5, offers: { keep: { qty: 7 } }, audit: ["stay"] });
+      const original = JSON.stringify({ schemaVersion: 6, offers: { keep: { qty: 7 } }, audit: ["stay"] });
       fs.writeFileSync(file, original);
       assert.throws(() => openRecords(file), /schemaVersion/);
       assert.equal(fs.readFileSync(file, "utf8"), original);
       assert.equal(fs.existsSync(`${file}.pre-m2.bak`), false);
       assert.equal(fs.existsSync(`${file}.pre-m3.bak`), false);
       assert.equal(fs.existsSync(`${file}.pre-m4.bak`), false);
+      assert.equal(fs.existsSync(`${file}.pre-m5.bak`), false);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -160,8 +163,9 @@ describe("records store", () => {
     const records = openRecords(null);
     assert.equal(records.filePath, null);
     const length = records.transact((data) => {
-      assert.equal(data.schemaVersion, 4);
+      assert.equal(data.schemaVersion, 5);
       assert.deepEqual(data.requests, {});
+      assert.deepEqual(data.companies, {});
       data.audit.push({ event: "memory" });
       return data.audit.length;
     });
