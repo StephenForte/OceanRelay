@@ -6,10 +6,18 @@ const { spawn, execFileSync } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 const net = require("node:net");
+const vm = require("node:vm");
 const { createChain } = require("../../lib/chain");
 const { openKey } = require("../../lib/chain/keys");
 const { keccakHex } = require("../../lib/chain/keccak");
 const { hexToBytes } = require("../../lib/chain/hex");
+const { encodeCall, decodeResult } = require("../../lib/chain/abi");
+const { createServer } = require("../../server");
+const { loadConfig } = require("../../lib/config");
+const { openStore } = require("../../lib/store");
+const { openRecords } = require("../../lib/records");
+const { COOKIE_NAME, signSession } = require("../../lib/session");
+const { digestHex } = require("../eip712-generic");
 
 // Anvil's published default accounts. Test only. Never use for real funds.
 const KEYS = {
@@ -120,7 +128,7 @@ describe("anvil ledger", () => {
     assert.deepEqual(committed, built);
   });
 
-  it("confirms bind, publish, request, accept, status and cancel", async () => {
+  it("confirms bind, publish, request, accept, status and cancel", async (t) => {
     const port = await freePort();
     const url = `http://127.0.0.1:${port}`;
     const log = fs.openSync(path.join(scratch, "anvil.log"), "a");
@@ -290,5 +298,209 @@ describe("anvil ledger", () => {
       if (!receipt) await new Promise((resolve) => setTimeout(resolve, 50));
     }
     assert.equal(receipt && receipt.status, "0x1");
+
+    await t.test("binds a wallet through the HTTP routes", async () => {
+      await bindWalletOverHttp({
+        url,
+        address,
+        genesisHash: genesis.hash,
+        runtimeCodeHash: keccakHex(hexToBytes(code)),
+        scratch,
+      });
+    });
   });
 });
+
+const HTTP_SESSION = "anvil-wallet-session-secret";
+
+function htmlAttr(html, name) {
+  const match = new RegExp(`${name}="([^"]*)"`).exec(html);
+  if (!match) return "";
+  return match[1].replaceAll("&quot;", "\"").replaceAll("&#39;", "'").replaceAll("&amp;", "&");
+}
+
+async function browserSignature(html, privateKey) {
+  const signer = openKey(privateKey);
+  const form = {
+    attributes: {
+      "data-domain": htmlAttr(html, "data-domain"),
+      "data-company-key": htmlAttr(html, "data-company-key"),
+      "data-deadline": htmlAttr(html, "data-deadline"),
+    },
+    children: [
+      { name: "wallet", value: "" },
+      { name: "signature", value: "" },
+    ],
+    getAttribute(name) {
+      return this.attributes[name];
+    },
+    querySelector(selector) {
+      const found = /name=([A-Za-z]+)/.exec(selector);
+      return this.children.find((child) => child.name === found[1]);
+    },
+    submit() {},
+  };
+  const button = {
+    listeners: {},
+    addEventListener(type, fn) {
+      this.listeners[type] = fn;
+    },
+  };
+  const document = {
+    getElementById(id) {
+      if (id === "wallet-bind") return form;
+      if (id === "wallet-sign") return button;
+      if (id === "wallet-note") return { textContent: "" };
+      return null;
+    },
+  };
+  const ethereum = {
+    request({ method, params }) {
+      if (method === "eth_requestAccounts") return Promise.resolve([signer.address]);
+      return Promise.resolve(signer.signDigest(digestHex(JSON.parse(params[1]))));
+    },
+  };
+  const script = fs.readFileSync(path.join(__dirname, "../../lib/assets/wallet.js"), "utf8");
+  vm.runInNewContext(script, { window: { ethereum }, document }, { filename: "wallet.js" });
+  await button.listeners.click({ preventDefault() {} });
+  return {
+    companyKey: form.attributes["data-company-key"],
+    deadline: form.attributes["data-deadline"],
+    wallet: form.children[0].value,
+    signature: form.children[1].value,
+  };
+}
+
+async function bindWalletOverHttp({ url, address, genesisHash, runtimeCodeHash, scratch }) {
+  const recordsPath = path.join(scratch, "http-records.json");
+  const config = loadConfig({
+    RATE_NINJA_CLIENT_ID: "capacity-exchange",
+    RATE_NINJA_CLIENT_SECRET: "anvil-client-secret",
+    SESSION_SECRET: HTTP_SESSION,
+    TOKEN_ENCRYPTION_KEY: "anvil-token-encryption-key",
+    RATE_NINJA_BASE_URL: "http://127.0.0.1:9",
+    OCEANRELAY_REDIRECT_URI: "http://127.0.0.1:9/oauth/callback",
+    OCEANRELAY_RECORDS_PATH: recordsPath,
+    OCEANRELAY_STORE_PATH: path.join(scratch, "http-store.json"),
+    OCEANRELAY_RELAYER_KEY: KEYS.relayer,
+    OCEANRELAY_REGISTRAR_KEY: KEYS.registrar,
+    CF_ACCESS_CLIENT_ID: "anvil-access-id",
+    CF_ACCESS_CLIENT_SECRET: "anvil-access-secret",
+    FORTEL2_READ_RPC: url,
+    FORTEL2_WRITE_RPC: url,
+    OCEANRELAY_CHAIN_MAX_FEE_GWEI: "100",
+  });
+  const store = openStore(config.storePath, config.tokenEncryptionKey);
+  const records = openRecords(recordsPath);
+  function seed(sid, csrf, profile) {
+    store.saveConnection(sid, {
+      refreshToken: `refresh-${sid}`,
+      scopes: ["profile:read", "rates:read", "sailings:read"],
+      profile: {
+        companyType: "Contract Owner",
+        active: true,
+        name: profile.companyName,
+        ...profile,
+      },
+    });
+    const value = encodeURIComponent(signSession({ sid, csrf, iat: Date.now() }, HTTP_SESSION));
+    return `${COOKIE_NAME}=${value}`;
+  }
+  const kings = seed("sid-kings", "csrf-kings", { sub: "user-kings", companyId: "anvil-kings", companyName: "Anvil Kings" });
+  const other = seed("sid-other", "csrf-other", { sub: "user-other", companyId: "anvil-other", companyName: "Anvil Other" });
+  const server = createServer({
+    config,
+    store,
+    records,
+    deployment: {
+      chainId: 31337,
+      genesisHash,
+      address,
+      runtimeCodeHash,
+    },
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const readyDeadline = Date.now() + 15_000;
+    let chainState = "";
+    while (Date.now() < readyDeadline) {
+      const configBody = await (await fetch(`${base}/config`)).json();
+      chainState = configBody.chain && configBody.chain.state;
+      if (chainState === "ready") break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.equal(chainState, "ready");
+
+    async function submit(cookie, csrf) {
+      const prepared = await fetch(`${base}/wallet/prepare`, {
+        method: "POST",
+        redirect: "manual",
+        headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ csrf_token: csrf }),
+      });
+      assert.equal(prepared.status, 303);
+      const page = await (await fetch(`${base}/wallet`, { headers: { cookie } })).text();
+      const signed = await browserSignature(page, KEYS.stranger);
+      const response = await fetch(`${base}/wallet/bind`, {
+        method: "POST",
+        redirect: "manual",
+        headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          csrf_token: csrf,
+          wallet: signed.wallet,
+          deadline: signed.deadline,
+          signature: signed.signature,
+        }),
+      });
+      const shown = response.headers.get("location")
+        ? await (await fetch(new URL(response.headers.get("location"), base), { headers: { cookie } })).text()
+        : "";
+      return { status: response.status, location: response.headers.get("location"), signed, shown };
+    }
+
+    const first = await submit(kings, "csrf-kings");
+    assert.equal(first.location, "/wallet?result=bound", first.shown.slice(0, 200));
+    const companyKey = records.companyKeyFor("anvil-kings");
+    const bound = records.walletsFor("anvil-kings")[0];
+    assert.equal(bound.state, "confirmed");
+    assert.match(bound.txHash, /^0x[0-9a-fA-F]{64}$/);
+    const encoded = encodeCall("walletCompany", [bound.wallet]);
+    const onChain = decodeResult("walletCompany", await rpc(url, "eth_call", [{ to: address, data: encoded }, "latest"]));
+    assert.equal(onChain.toLowerCase(), companyKey.toLowerCase());
+    const firstHash = bound.txHash;
+
+    records.transact((data) => {
+      data.companies["anvil-kings"].wallets = [];
+    });
+    const again = await submit(kings, "csrf-kings");
+    assert.equal(again.location, "/wallet?result=bound");
+    const rebound = records.walletsFor("anvil-kings").at(-1);
+    assert.equal(rebound.state, "confirmed");
+    assert.equal(rebound.txHash, null);
+    assert.equal(rebound.error, null);
+
+    const second = await submit(other, "csrf-other");
+    assert.equal(second.location, "/wallet?result=other_company");
+    assert.match(second.shown, /This wallet belongs to another company/);
+    assert.equal(second.shown.includes(companyKey), false);
+    assert.equal(second.shown.includes("anvil-kings"), false);
+    assert.equal(records.walletsFor("anvil-other").at(-1).state, "refused");
+
+    records.transact((data) => {
+      const entry = data.companies["anvil-kings"].wallets.at(-1);
+      entry.state = "pending";
+      entry.txHash = firstHash;
+    });
+    const checked = await fetch(`${base}/wallet/check`, {
+      method: "POST",
+      redirect: "manual",
+      headers: { cookie: kings, "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ csrf_token: "csrf-kings" }),
+    });
+    assert.equal(checked.headers.get("location"), "/wallet?result=bound");
+    assert.equal(records.walletsFor("anvil-kings").at(-1).state, "confirmed");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
