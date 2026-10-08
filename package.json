@@ -9,6 +9,10 @@
     "test": "node --test \"test/*.test.js\""
   },
   "engines": {
-    "node": ">=20.12"
+    "node": "26.x"
+  },
+  "dependencies": {
+    "@noble/curves": "2.4.0",
+    "@noble/hashes": "2.4.0"
   }
 }
