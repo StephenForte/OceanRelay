@@ -87,7 +87,7 @@ Status values: `ready` (prompt written, can dispatch), `blocked-on <x>`, `dispat
 | O-2 | Revoke: revoke OceanRelay in Rate Ninja consents; wait 10+ minutes (access token lifetime); reload OceanRelay; it shows Disconnected (refresh fails with `invalid_grant`). | done 2026-09-29 (operator ran both directions) |
 | O-3 | Refused company: a Freight Forwarder/Customer account attempts Connect and sees the contract-owner-only message. | open |
 | O-4 | **Provision test accounts on Rate Ninja** now, because Phases 3–4 cannot be accepted without them: (a) contract owner with rates — exists; (b) contract owner with no rates; (c) a second contract owner at a **different company** (Phase 4 buyer); (d) a customer-company account for O-3. | done 2026-09-30 — one account (`co-test-buyer` / `testbuyer`, no rates, separate company) covers (b) and (c) |
-| O-5 | Confirm the Node version the Render service runs (Render dashboard or `NODE_VERSION` env). Needs ≥ 20.12. | open |
+| O-5 | Confirm the Node version the Render service runs. Needs ≥ 20.12. | **done 2026-10-07**: Render resolves `engines >=20.12` to Node 26.10.0 / 26.11.0 (build logs, read by the planner). T13 pins it to 26.x (D-26). |
 | O-6 | **Done 2026-09-28 (operator verified /config).** Before merging PR #6: set `OCEANRELAY_RECORDS_PATH=/var/data/oceanrelay-records.json` on the Render service, the same persistent disk as the token store. The default `data/oceanrelay-records.json` is on Render's ephemeral filesystem, so offers written there would vanish on the next deploy. | done |
 
 ### Wave A — foundations (dispatch all three now, in parallel)
@@ -133,7 +133,7 @@ Tasks, in order. Each runs after the previous one merges.
 | --- | --- | --- | --- | --- |
 | T12 | OceanRelayLedger contract, Foundry tests, deploy script, EIP-712 test vectors, contracts CI (C-14) | `contracts/**`, `.github/workflows/contracts.yml` | strongest | **merged 2026-10-06, PR #47 at `113c8f4`** (review in §6) |
 | O-10 | **The operator deployed** OceanRelayLedger to chain 852 on 2026-10-07: address `0x481175bC15eE6e22EAB97176540a98aB6a2925eF`, transaction `0x8e80…c9c3`, block 1991782. Recorded in `deployments/fortel2-sepolia.json`. The relayer is funded with 0.01 ETH and the owner has 0.002 ETH left, both deposited from Sepolia through L1StandardBridge `0x113A…85a7`. | operator | — | **done 2026-10-07**; planner verified (§7) |
-| T13 | Chain client: write RPC with the Access headers; relayer transaction signing (`@noble/*`); sequencer receipts; pending, retry and reconcile; startup checks (D-24). It must match T12's test vectors. | `lib/chain*.js` | strongest | after O-10 |
+| T13 | Chain client (C-15, D-26): read and write RPCs, relayer EIP-1559 signing and registrar EIP-712 signing (`@noble/*`, exact pins, lockfile), sequencer receipts, the refused/pending/confirmed/reverted model, startup checks against `deployments/fortel2-sepolia.json`, `/config` chain status, Node pinned to 26.x, F-17 README fixes. It must match T12's vectors byte for byte. | `lib/chain/**`, `contracts/abi/` | strongest | **approved 2026-10-07**: PR #51 at `d310ee2`, after three rounds (§6). Prompt: `docs/prompts/T13-chain-client.md`. After merge, O-11: the operator adds the 4 secrets in Render. |
 | T14 | Wallet binding: the wallet-page script (D-25), the EIP-712 `Binding`, and the binding record and screens | — | strong | after T13 |
 | T15 | Publish, version, state, request, acceptance, status and cancellation recorded on chain, with pending, confirmed and failed shown in the UI | — | strongest | after T14 |
 | T16 | Operator reconciliation: compare the records with chain events and flag mismatches; a repair is an audited correction | — | strong | after T15 |
@@ -732,6 +732,50 @@ The operator merged #32 by accident before the planner review. The review then r
 - **T15:** `recordRequest` and `recordAcceptance` check only the offer's stored state, not `block.timestamp` against `expiresAt`. A retry of an acceptance made just before expiry can therefore still land. That suits pending and retry handling, but T15 must call `markExpired` itself and reconcile accordingly.
 - **T13:** the runtime-code hash includes the EIP-712 immutables (chain ID and address), so D-24's startup check must compare against the hash the deploy script printed, which is recorded in `deployments/fortel2-sepolia.json`, not against a hash of the build artifact.
 
+### T13 — PR #51, first round `c4ed32c`: changes requested 2026-10-07
+
+- **Base and scope:** merge-base `780e3b6` = `main`. No off-limits file. `server.js` adds the chain, `start()` and `deps.chain`; `system.js` replaces `body.chain` with `deps.chain.status()`. Docs PR #50 (D-26, C-15, the prompt) was still open; the worker read it from the planning branch.
+- **Gate** (planner, scratch clone, Node 26.9.0, Foundry): `npm test` 229/0/0; `npm run test:chain` 2/2 on anvil, no anvil left running and nothing left in /tmp; `forge test` 84 passed. Matches the handoff.
+- **Dependencies:** `@noble/curves` 2.4.0 and `@noble/hashes` 2.4.0, exact pins, both published 2026-08-27; the lockfile holds only those two, with integrity hashes that match the registry; `engines` "26.x".
+- **Vectors, independently with `cast`** (not the worker's code): for all 8 types, the type hash, struct hash (`cast abi-encode`), digest and signature (`cast wallet sign --no-hash`, RFC 6979) match `contracts/vectors/eip712.json`. The vector domain separator and the deployed separator `0x48179b30…fd5956` match. `createChain(...).registrarSign`, given the vector key and the vector domain, reproduces the Binding signature byte for byte.
+- **Mutation tests on anvil:** swapping the two RLP fee fields, flipping `yParity`, changing the domain version to "2", and changing `Acceptance.counter` to uint64 each turn `npm run test:chain` red.
+- **Probes with the planner's own mock RPC** (fake keys and fake Access values):
+  - **States:** ready; chain ID, genesis, code hash, relayer, registrar and paused each give `misconfigured` with that reason; an unreachable RPC gives `degraded/network`; 3 of 4 secrets gives `incomplete`; none gives `disabled`; a bad key gives `relayer_key`. Every non-ready state refuses `submit` with 0 raw transactions.
+  - **Recovery:** degraded, then the injected 60 s retry fires, then ready.
+  - **Nonces:** 5 concurrent submits with random send latency send nonces 7, 8, 9, 10 and 11 in that order, and all are confirmed.
+  - **Fees:** maxFee = 2 × 251 + 1,000,000 = 1,000,502 wei; gas = 100,000 × 1.25 = 125,000; a 0.0005 gwei cap clamps maxFee and the priority fee to 500,000.
+  - **Revert:** returns `refused`, with 0 raw transactions. **Missing receipt:** `pending` with the hash after 30 polls (30 s, injected clock); a later `receipt(hash)` returns `confirmed`.
+  - **Routing:** the write host saw only `eth_sendRawTransaction`; the read host saw 14 calls and no `cf-access` header.
+  - **Leaks:** none of the keys or Access values appears, in any case or encoding (hex with and without `0x`, upper case, decimal bytes, base64), in console output, read traffic, write bodies, `util.inspect` (`showHidden`, depth 20) of the chain or of each method, `JSON.stringify`, status, or thrown errors. Console output is only the three fixed codes.
+  - **Marketplace with the chain down:** with `server.js` patched in the scratch clone to enable the chain with fake secrets against a dead read RPC (`127.0.0.1:9`), all 229 `npm test` tests pass.
+  - **Write host, without credentials:** HTTP 403 and no redirect, both with no headers and with fake ones, so the Access headers cannot follow a redirect off-host.
+- **Blocking: an ambiguous send is reported as `refused`, with no hash.**
+  - In `broadcast()`, any error from `eth_sendRawTransaction`, including a timeout or network error after the request left, rolls the nonce back and returns `refused/SendFailed` with no hash.
+  - Probe: the node accepted the transaction (nonce 7, mined), then the response was lost (`TimeoutError`). `submit` returned `{"state":"refused","error":{"name":"SendFailed"}}`, and the transaction is on chain.
+  - Under D-26, `refused` means "sends nothing", and the PRD says a pending action is never a final rejection. T15 would record a final rejection for an action that confirmed, with no hash for T16 to reconcile. The rolled-back nonce is then reused, which gets "replacement underpriced" while the first is still in the mempool.
+  - **Fix shown to work** in the scratch clone: compute the hash locally from the signed raw transaction; on a transport failure (timeout, network, 5xx, bad JSON), keep the nonce consumed and return the hash so the receipt poll runs. The probe then returns `confirmed` with hash and nonce 7, and `npm test` (229) and `test:chain` (2) stay green.
+- **Not blocking, recorded for O-11:** the startup check never touches the write host (D-26 as written), so `chain.state: "ready"` does not prove the Access values are right. With wrong values every submit gets a 403 and returns `refused/SendFailed`, which is correct, while `/config` still reads ready. O-11 verifies the Access values separately.
+
+**T13 round 2, `0a2b983`: changes requested 2026-10-07**
+- **Base and scope:** merge-base `780e3b6` = `main`. One commit, touching `lib/chain/index.js`, `lib/chain/rpc.js`, `test/chain-submit.test.js` and `test/mock-chain.js`, all owned.
+- **Gate** (planner, scratch clone): `npm test` 232/0/0; `test:chain` 2/2; `forge test` 84. The round-1 probe suite passes unchanged. The round-1 defect is fixed: a send accepted by the node whose reply is lost now returns `confirmed`, with the local hash and nonce 7.
+- **Changed tests:** three cases added. `console.error` is silenced in the submit suite only (the leak sweep is in `chain-secrets` and is unaffected). The mock stores sends under keccak(raw). No assertion weakened.
+- **Blocking: a send that never reached the node leaves a nonce gap that never heals.**
+  - Round 2 keeps the nonce consumed on every unknown send but never re-reads the chain, so the brief's "unless the chain shows it was not used" (clause 2) is missing.
+  - Probe, with a geth-like mock in which a transaction mines only when its nonce is next: the write host fails before delivery (`TypeError: fetch failed`, or a Cloudflare-style HTTP 429). A returns `pending@7`. After the 60 s retry, B, C and D return `pending@8`, `pending@9` and `pending@10`. The node mined up to 6, and 8–10 are queued behind the gap. The pending count is read once (7). Every later write stalls until the process restarts.
+  - **Fix shown to work** in the scratch clone: on an unknown send, set `nextNonce = null`, so the next allocation re-reads the sequencer's `pending` count. Results: undelivered → B, C and D confirmed at 7, 8 and 9 (reads 7, 7); accepted then lost → confirmed at 8, 9 and 10 (reads 7, 8; no reuse). `npm test` 232 and `test:chain` 2 stay green.
+- **Bugbot (429 as a final rejection):** the worker's call is right. A 429 from Cloudflare may or may not have been forwarded, and with the resync above either case is safe.
+
+**T13 round 3, `d310ee2`: approved 2026-10-07**
+- **Base and scope:** merge-base `780e3b6` = `main`. In `lib/`, the only change is `nextNonce = null` on an unknown send (`lib/chain/index.js`, 3 lines); the rest is tests and the mock.
+- **Gate** (planner, scratch clone): `npm test` 235/0/0; `test:chain` 2/2; `forge test` 84; no anvil left running. CI on `d310ee2`: Semgrep, Trivy, Foundry and Bugbot all pass.
+- **Probes:**
+  - undelivered (network error) and 429: B, C and D confirmed at 7, 8 and 9 (pending reads 7, 7);
+  - accepted, reply lost: confirmed at 8, 9 and 10 (reads 7, 8; no reuse);
+  - the round-1 ambiguous probe: confirmed with the local hash;
+  - the full round-1 probe suite passes.
+- **New tests shown red:** with `0a2b983`'s `index.js`, the worker's three new cases fail (3 of 10 in `chain-submit`). The mock now mines only at the next nonce, which strengthens it.
+
 ---
 
 ## 7. Operator reports
@@ -1014,6 +1058,36 @@ This section holds what previously lived only in the planning conversation. It i
 - **Planning branch** `sf/gallant-newton-t4rszt` is deleted by GitHub on every merge and
   re-created on the next push. **Open its PR in the same step as the push**; the operator
   noticed it as a "stray branch" when a push had no PR.
+
+### Environment facts added 2026-10-07 (Phase 5 sessions)
+
+- **Render, read through the Render API** (workspace "Supa Workspace", `tea-d98533l7vvec738vva90`; the operator approved read-only use):
+  - service `OceanRelay`, `srv-daqsg7rncjis73b76upg`;
+  - runtime **python** (the image has Node); build command `npm install`, start command `npm start`;
+  - auto-deploy on commit to main; disk `/var/data` (1 GB).
+  - Node comes from `engines`: 26.10.0, then 26.11.0. T13 pins it to 26.x (D-26).
+  - The sequencer, replica and explorer are also Render services in the same workspace.
+- **Planner tooling on the Mac:**
+  - Foundry 1.8.5 is in `~/.foundry/bin` and is **not on the planner shell's PATH**. Prefix with `export PATH=$HOME/.foundry/bin:$PATH`.
+  - `python3` is broken ("Bad CPU type"), so use Node.
+  - Never splice docs with `String.replace` (see above).
+  - The scratch directory can be wiped mid-session. Re-create probes from the plan's descriptions.
+- **Operator deploy setup:**
+  - a fresh clone at `~/oceanrelay-deploy`;
+  - Foundry keystore accounts `owner` (`0x0Ac2B0d0A4Eb9d223633B91e03F79971DB953C20`), `relayer` (`0xf8B8B3b58ebaC9fC530D9244C22f391E90CC8ae2`) and `registrar` (`0x32b2231464F99B81f5fcffbbA66b99fdA97bB116`);
+  - each `cast wallet address --account X` asks for **X**'s password;
+  - new Terminal windows lose Foundry from PATH.
+- **Funding chain 852:**
+  - by Sepolia deposit only, through L1StandardBridge `0x113AAd08047E9a9B1556627A658f87F0EbEf85a7` with `depositETHTo(addr, 200000, 0x)`, using the public Sepolia RPC `https://ethereum-sepolia-rpc.publicnode.com`;
+  - balances on 2026-10-07: relayer 0.01 ETH, owner about 0.002 ETH.
+  - Measured costs: deploy 3.34M gas, about 0.0000033 ETH; the largest record call about 134k gas, about 0.00000013 ETH.
+- **Cloudflare Access:** the direct test is `curl` with the two headers, which should return HTTP 200 and `0x354`. A 403 meant the values were mistyped; pasting fixed it.
+- **O-11** (after T13 merges): the operator adds to Render `OCEANRELAY_RELAYER_KEY`, `OCEANRELAY_REGISTRAR_KEY`, `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET`. The keys are printed once with `cast wallet private-key --account <name>`. Healthy means `/config` shows `chain.state: "ready"`. The owner key never goes to Render.
+- **Planner review method for chain work, used for T12:**
+  - recompute the vectors in Node from the **C-14 text**, and recover signers through the `ecrecover` precompile on anvil;
+  - mutation-test the contract guards;
+  - dry-run deploy on anvil;
+  - after a real deploy, check the receipt, `keccak(getCode)`, the roles and the domain separator on the sequencer.
 
 ### Open work after T6
 
