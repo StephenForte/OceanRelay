@@ -225,4 +225,53 @@ describe("company wallets", () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("applies the submit result after a check has already moved the row", () => {
+    const dir = tempDir();
+    try {
+      const file = path.join(dir, "records.json");
+      const records = openRecords(file);
+      records.ensureCompanyKey("kings");
+      const wallet = "0x1111111111111111111111111111111111111111";
+      const hash = `0x${"ab".repeat(32)}`;
+      records.beginWalletBind("kings", { wallet, boundBy: "user-owner", deadline: 100 });
+      records.applyWalletChecks("kings", [{ wallet, state: "expired", error: null }]);
+      const finished = records.finishWalletBind("kings", wallet, {
+        state: "confirmed",
+        txHash: hash,
+        error: null,
+        audit: true,
+      });
+      assert.equal(finished.ok, true);
+      assert.equal(finished.entry.state, "confirmed");
+      assert.equal(finished.entry.txHash, hash);
+      const stored = JSON.parse(fs.readFileSync(file, "utf8"));
+      assert.equal(stored.audit.filter((entry) => entry.event === "wallet.bound").length, 1);
+
+      records.beginWalletBind("kings", {
+        wallet: "0x2222222222222222222222222222222222222222",
+        boundBy: "user-owner",
+        deadline: 100,
+      });
+      records.applyWalletChecks("kings", [{
+        wallet: "0x2222222222222222222222222222222222222222",
+        state: "confirmed",
+        audit: true,
+        error: null,
+      }]);
+      records.finishWalletBind("kings", "0x2222222222222222222222222222222222222222", {
+        state: "confirmed",
+        txHash: hash,
+        error: null,
+        audit: true,
+      });
+      const again = JSON.parse(fs.readFileSync(file, "utf8"));
+      const second = again.companies.kings.wallets[1];
+      assert.equal(second.state, "confirmed");
+      assert.equal(second.txHash, hash);
+      assert.equal(again.audit.filter((entry) => entry.event === "wallet.bound").length, 2);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

@@ -407,6 +407,58 @@ describe("wallet refusals", () => {
 });
 
 describe("wallet bind results", () => {
+  it("refuses the row when the registrar cannot sign, and does not send", async () => {
+    await withApp(async (ctx) => {
+      const companyKey = await prepare(ctx);
+      const wallet = openKey(KEYS.wallet).address;
+      const other = openKey(KEYS.other).address;
+      ctx.chain.registrarSign = () => {
+        throw new Error("registrar key unavailable");
+      };
+      const failed = await post(ctx.base, ctx.kings.cookie, "/wallet/bind", bindFields(ctx, ctx.kings, KEYS.wallet, wallet, deadlineIn(600), companyKey));
+      assert.equal(failed.status, 303);
+      assert.equal(failed.location, "/wallet?result=unavailable");
+      assert.equal(ctx.chain.calls.submit, 0);
+      const stuck = ctx.records.walletsFor("kings")[0];
+      assert.equal(stuck.state, "refused");
+      assert.equal(stuck.txHash, null);
+      ctx.chain.registrarSign = () => `0x${"11".repeat(65)}`;
+      ctx.chain.next = { state: "pending", hash: HASH };
+      const again = await post(ctx.base, ctx.kings.cookie, "/wallet/bind", bindFields(ctx, ctx.kings, KEYS.other, other, deadlineIn(600), companyKey));
+      assert.equal(again.location, "/wallet?result=pending");
+      assert.equal(ctx.chain.calls.submit, 1);
+      assert.equal(ctx.records.walletsFor("kings").at(-1).state, "pending");
+    });
+  });
+
+  it("writes the submit result when a check expires the row while submit is in flight", async () => {
+    await withApp(async (ctx) => {
+      const companyKey = await prepare(ctx);
+      const wallet = checksumAddress(openKey(KEYS.wallet).address);
+      const soon = deadlineIn(600);
+      let release;
+      ctx.chain.hold = new Promise((resolve) => {
+        release = resolve;
+      });
+      ctx.chain.next = { state: "confirmed", hash: HASH };
+      const pending = post(ctx.base, ctx.kings.cookie, "/wallet/bind", bindFields(ctx, ctx.kings, KEYS.wallet, wallet, soon, companyKey));
+      const deadline = Date.now() + 2000;
+      while (ctx.chain.calls.submit < 1) {
+        if (Date.now() > deadline) throw new Error("submit did not start");
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      ctx.records.applyWalletChecks("kings", [{ wallet, state: "expired", error: null }]);
+      release();
+      const response = await pending;
+      assert.equal(response.location, "/wallet?result=bound");
+      const entry = ctx.records.walletsFor("kings")[0];
+      assert.equal(entry.state, "confirmed");
+      assert.equal(entry.txHash, HASH);
+      const stored = JSON.parse(fs.readFileSync(ctx.recordsPath, "utf8"));
+      assert.equal(stored.audit.filter((item) => item.event === "wallet.bound").length, 1);
+    });
+  });
+
   it("writes submitting before the registrar signs, and only one of two concurrent binds is sent", async () => {
     await withApp(async (ctx) => {
       const companyKey = await prepare(ctx);
