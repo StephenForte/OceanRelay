@@ -133,7 +133,7 @@ Tasks, in order. Each runs after the previous one merges.
 | --- | --- | --- | --- | --- |
 | T12 | OceanRelayLedger contract, Foundry tests, deploy script, EIP-712 test vectors, contracts CI (C-14) | `contracts/**`, `.github/workflows/contracts.yml` | strongest | **merged 2026-10-06, PR #47 at `113c8f4`** (review in §6) |
 | O-10 | **The operator deployed** OceanRelayLedger to chain 852 on 2026-10-07: address `0x481175bC15eE6e22EAB97176540a98aB6a2925eF`, transaction `0x8e80…c9c3`, block 1991782. Recorded in `deployments/fortel2-sepolia.json`. The relayer is funded with 0.01 ETH and the owner has 0.002 ETH left, both deposited from Sepolia through L1StandardBridge `0x113A…85a7`. | operator | — | **done 2026-10-07**; planner verified (§7) |
-| T13 | Chain client (C-15, D-26): read and write RPCs, relayer EIP-1559 signing and registrar EIP-712 signing (`@noble/*`, exact pins, lockfile), sequencer receipts, the refused/pending/confirmed/reverted model, startup checks against `deployments/fortel2-sepolia.json`, `/config` chain status, Node pinned to 26.x, F-17 README fixes. It must match T12's vectors byte for byte. | `lib/chain/**`, `contracts/abi/` | strongest | **in review**: PR #51 round 1 `c4ed32c` and round 2 `0a2b983`, changes requested 2026-10-07 (round 2: a send that never reached the node leaves a nonce gap; §6). Prompt: `docs/prompts/T13-chain-client.md`. After merge, O-11: the operator adds the 4 secrets in Render. |
+| T13 | Chain client (C-15, D-26): read and write RPCs, relayer EIP-1559 signing and registrar EIP-712 signing (`@noble/*`, exact pins, lockfile), sequencer receipts, the refused/pending/confirmed/reverted model, startup checks against `deployments/fortel2-sepolia.json`, `/config` chain status, Node pinned to 26.x, F-17 README fixes. It must match T12's vectors byte for byte. | `lib/chain/**`, `contracts/abi/` | strongest | **approved 2026-10-07**: PR #51 at `d310ee2`, after three rounds (§6). Prompt: `docs/prompts/T13-chain-client.md`. After merge, O-11: the operator adds the 4 secrets in Render. |
 | T14 | Wallet binding: the wallet-page script (D-25), the EIP-712 `Binding`, and the binding record and screens | — | strong | after T13 |
 | T15 | Publish, version, state, request, acceptance, status and cancellation recorded on chain, with pending, confirmed and failed shown in the UI | — | strongest | after T14 |
 | T16 | Operator reconciliation: compare the records with chain events and flag mismatches; a repair is an audited correction | — | strong | after T15 |
@@ -765,6 +765,16 @@ The operator merged #32 by accident before the planner review. The review then r
   - Probe, with a geth-like mock in which a transaction mines only when its nonce is next: the write host fails before delivery (`TypeError: fetch failed`, or a Cloudflare-style HTTP 429). A returns `pending@7`. After the 60 s retry, B, C and D return `pending@8`, `pending@9` and `pending@10`. The node mined up to 6, and 8–10 are queued behind the gap. The pending count is read once (7). Every later write stalls until the process restarts.
   - **Fix shown to work** in the scratch clone: on an unknown send, set `nextNonce = null`, so the next allocation re-reads the sequencer's `pending` count. Results: undelivered → B, C and D confirmed at 7, 8 and 9 (reads 7, 7); accepted then lost → confirmed at 8, 9 and 10 (reads 7, 8; no reuse). `npm test` 232 and `test:chain` 2 stay green.
 - **Bugbot (429 as a final rejection):** the worker's call is right. A 429 from Cloudflare may or may not have been forwarded, and with the resync above either case is safe.
+
+**T13 round 3, `d310ee2`: approved 2026-10-07**
+- **Base and scope:** merge-base `780e3b6` = `main`. In `lib/`, the only change is `nextNonce = null` on an unknown send (`lib/chain/index.js`, 3 lines); the rest is tests and the mock.
+- **Gate** (planner, scratch clone): `npm test` 235/0/0; `test:chain` 2/2; `forge test` 84; no anvil left running. CI on `d310ee2`: Semgrep, Trivy, Foundry and Bugbot all pass.
+- **Probes:**
+  - undelivered (network error) and 429: B, C and D confirmed at 7, 8 and 9 (pending reads 7, 7);
+  - accepted, reply lost: confirmed at 8, 9 and 10 (reads 7, 8; no reuse);
+  - the round-1 ambiguous probe: confirmed with the local hash;
+  - the full round-1 probe suite passes.
+- **New tests shown red:** with `0a2b983`'s `index.js`, the worker's three new cases fail (3 of 10 in `chain-submit`). The mock now mines only at the next nonce, which strengthens it.
 
 ---
 
