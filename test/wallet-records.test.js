@@ -274,4 +274,42 @@ describe("company wallets", () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("does not revive an expired bind after another bind has started", () => {
+    const dir = tempDir();
+    try {
+      const file = path.join(dir, "records.json");
+      const records = openRecords(file);
+      records.ensureCompanyKey("kings");
+      const first = "0x1111111111111111111111111111111111111111";
+      const second = "0x2222222222222222222222222222222222222222";
+      records.beginWalletBind("kings", { wallet: first, boundBy: "user-owner", deadline: 100 });
+      records.applyWalletChecks("kings", [{ wallet: first, state: "expired", error: null }]);
+      const begun = records.beginWalletBind("kings", { wallet: second, boundBy: "user-owner", deadline: 100 });
+      assert.equal(begun.ok, true);
+      const late = records.finishWalletBind("kings", first, {
+        state: "pending",
+        txHash: `0x${"cd".repeat(32)}`,
+        error: null,
+        audit: false,
+      });
+      assert.deepEqual(late, { ok: false, error: "superseded" });
+      const wallets = records.walletsFor("kings");
+      assert.equal(wallets[0].state, "expired");
+      assert.equal(wallets[0].txHash, null);
+      assert.equal(wallets[1].state, "submitting");
+      const confirmed = records.finishWalletBind("kings", first, {
+        state: "confirmed",
+        txHash: `0x${"cd".repeat(32)}`,
+        error: null,
+        audit: true,
+      });
+      assert.equal(confirmed.ok, false);
+      assert.equal(records.walletsFor("kings")[0].state, "expired");
+      const stored = JSON.parse(fs.readFileSync(file, "utf8"));
+      assert.equal(stored.audit.filter((entry) => entry.event === "wallet.bound").length, 0);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
