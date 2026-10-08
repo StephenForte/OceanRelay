@@ -166,7 +166,7 @@ Leave `FORTEL2_READ_RPC`, `FORTEL2_WRITE_RPC`, and `OCEANRELAY_CHAIN_MAX_FEE_GWE
 
 A signed-in user opens `/wallet` to bind a browser wallet to their company. The page lists the company's wallets. Each row shows the address, a state, the date, and, when there is a transaction hash, a link to the explorer.
 
-Prepare creates the company key. It does not send a transaction. Connect and sign asks the browser wallet to sign the binding. The registrar co-signs, and the relayer sends it. The wallet can be on any network. The user needs no ETH and does not switch networks, because signing typed data does not send a transaction. Without a browser wallet, or without JavaScript, the page explains that and binds nothing.
+Prepare creates the company key. It does not send a transaction. Connect and sign asks the browser wallet to sign the binding. The registrar co-signs, and the relayer sends it. The wallet asks to switch to ForteL2 Sepolia, or to add that network if the wallet does not know it. The user still needs no ETH, because the wallet only signs and the relayer sends the transaction. Without a browser wallet, or without JavaScript, the page explains that and binds nothing.
 
 Check pending is the only way a submitting or pending binding moves on. Opening the page does not ask the chain.
 

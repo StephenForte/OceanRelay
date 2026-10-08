@@ -689,6 +689,12 @@ describe("wallet bind results", () => {
       const domain = JSON.parse(attr(page.html, "data-domain"));
       const companyKey = attr(page.html, "data-company-key");
       const deadline = attr(page.html, "data-deadline");
+      const chain = JSON.parse(attr(page.html, "data-chain"));
+      assert.equal(chain.chainId, "0x354");
+      assert.equal(chain.chainName, "ForteL2 Sepolia");
+      assert.deepEqual(chain.nativeCurrency, { name: "Ether", symbol: "ETH", decimals: 18 });
+      assert.deepEqual(chain.rpcUrls, ["https://fortel2-sequencer-rpc.onrender.com/"]);
+      assert.deepEqual(chain.blockExplorerUrls, ["https://settlementos-explorer-ihgo.onrender.com/fortel2-sepolia/"]);
       const signer = openKey(KEYS.wallet);
       let captured = null;
       const form = {
@@ -696,6 +702,7 @@ describe("wallet bind results", () => {
           "data-domain": JSON.stringify(domain),
           "data-company-key": companyKey,
           "data-deadline": deadline,
+          "data-chain": JSON.stringify(chain),
         },
         children: [
           { name: "wallet", value: "" },
@@ -729,6 +736,10 @@ describe("wallet bind results", () => {
       const ethereum = {
         request({ method, params }) {
           if (method === "eth_requestAccounts") return Promise.resolve([signer.address]);
+          if (method === "wallet_switchEthereumChain") {
+            assert.equal(params[0].chainId, "0x354");
+            return Promise.resolve(null);
+          }
           captured = JSON.parse(params[1]);
           return Promise.resolve(signer.signDigest(digestHex(captured)));
         },

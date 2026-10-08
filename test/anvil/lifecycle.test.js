@@ -357,6 +357,9 @@ async function browserSignature(html, privateKey) {
   const ethereum = {
     request({ method, params }) {
       if (method === "eth_requestAccounts") return Promise.resolve([signer.address]);
+      if (method === "wallet_switchEthereumChain" || method === "wallet_addEthereumChain") {
+        return Promise.resolve(null);
+      }
       return Promise.resolve(signer.signDigest(digestHex(JSON.parse(params[1]))));
     },
   };
