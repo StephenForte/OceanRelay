@@ -135,7 +135,7 @@ Tasks, in order. Each runs after the previous one merges.
 | O-10 | **The operator deployed** OceanRelayLedger to chain 852 on 2026-10-07: address `0x481175bC15eE6e22EAB97176540a98aB6a2925eF`, transaction `0x8e80…c9c3`, block 1991782. Recorded in `deployments/fortel2-sepolia.json`. The relayer is funded with 0.01 ETH and the owner has 0.002 ETH left, both deposited from Sepolia through L1StandardBridge `0x113A…85a7`. | operator | — | **done 2026-10-07**; planner verified (§7) |
 | T13 | Chain client (C-15, D-26): read and write RPCs, relayer EIP-1559 signing and registrar EIP-712 signing (`@noble/*`, exact pins, lockfile), sequencer receipts, the refused/pending/confirmed/reverted model, startup checks against `deployments/fortel2-sepolia.json`, `/config` chain status, Node pinned to 26.x, F-17 README fixes. It must match T12's vectors byte for byte. | `lib/chain/**`, `contracts/abi/` | strongest | **merged 2026-10-08**: PR #51 at `d310ee2` (merge `efba765`), after three rounds (§6). Prompt: `docs/prompts/T13-chain-client.md`. |
 | O-11 | **The operator added** the 4 chain secrets to Render. `/config` shows `chain.state: "ready"`, and the Access values were tested from the Render Shell (HTTP 200). | operator | — | **done 2026-10-08**; planner verified (§7) |
-| T14 | Wallet binding (D-27, C-16): `/wallet` with the wallet-page script and its CSP (D-25), the EIP-712 `Binding` signed in the browser and co-signed by the registrar, records schema 5 (`companies`), and the `wallet.bound` audit event | `lib/routes/wallet.js`, `lib/views/wallet.js`, the script | **strongest** (raised from strong: a migration, the authorization boundary T15 relies on, and the first page script) | **ready 2026-10-08**: `docs/prompts/T14-wallet-binding.md`. Dispatch after this docs PR merges. |
+| T14 | Wallet binding (D-27, C-16): `/wallet` with the wallet-page script and its CSP (D-25), the EIP-712 `Binding` signed in the browser and co-signed by the registrar, records schema 5 (`companies`), and the `wallet.bound` audit event | `lib/routes/wallet.js`, `lib/views/wallet.js`, the script | **strongest** (raised from strong: a migration, the authorization boundary T15 relies on, and the first page script) | **in review**: PR #53 round 1 `9bb5a98`, changes requested 2026-10-08 (MetaMask needs the wallet on chain 852; the planner's error; §6). Prompt: `docs/prompts/T14-wallet-binding.md`. |
 | T15 | Publish, version, state, request, acceptance, status and cancellation recorded on chain, with pending, confirmed and failed shown in the UI | — | strongest | after T14 |
 | T16 | Operator reconciliation: compare the records with chain events and flag mismatches; a repair is an audited correction | — | strong | after T15 |
 | A-5 | Phase 5 acceptance on the deployed service | operator | — | after T16 |
@@ -776,6 +776,26 @@ The operator merged #32 by accident before the planner review. The review then r
   - the round-1 ambiguous probe: confirmed with the local hash;
   - the full round-1 probe suite passes.
 - **New tests shown red:** with `0a2b983`'s `index.js`, the worker's three new cases fail (3 of 10 in `chain-submit`). The mock now mines only at the next nonce, which strengthens it.
+
+### T14 — PR #53, first round `9bb5a98`: changes requested 2026-10-08
+
+- **Base and scope:** merge-base `538873d` = `main`. 20 files, all owned or shared-additive. The `server.js` additions (an optional `chain`/`deployment` for tests, an optional header argument on `sendHtml`, an optional status on `redirect`) leave production defaults unchanged. `lib/wallet-script.js` serves the script with a content-hash `?v=`.
+- **Gate** (planner, scratch clone): `npm test` 256/0/0; `test:chain` 3/3, once the Soldeer dependencies were installed (the planner's first run skipped that step and was invalid); `forge test` 84. CI: Semgrep, Trivy and Bugbot pass. The contracts workflow does not trigger, because no `contracts/**` path changed.
+- **Changed tests:** schema assertions move from 4 to 5 in the records, fulfilment, versions and audit tests, and the "too new" fixture moves from 5 to 6. These follow the new schema; nothing is weakened.
+- **Probes** (the planner's own harness, with a stub chain that counts every call):
+  - `GET /wallet` before and after prepare: the records file is byte-identical with the same mtime, and there are 0 chain calls. The D-27 CSP is sent. The script tag appears only once a binding is possible. `/market` stays script-free with no CSP.
+  - **Typed data, signed by an independent implementation:** wallet.js ran in `vm`. Its `eth_signTypedData_v4` JSON was signed by `cast wallet sign --data` (alloy's EIP-712), POSTed to `/wallet/bind`, and came back `bound` and `confirmed`.
+  - **Order:** at the moment `registrarSign` ran, the records file on disk held exactly one `submitting` row.
+  - **The relayer's address, with a valid relayer signature:** `reserved`; the file is unchanged, with no sign and no submit.
+  - **Concurrent binds,** with the submit held open: one submit; the other request got `in_flight`.
+  - **The migration:** read in the diff; `migrateV4` is a shallow spread that adds `companies` and writes the backup first. The worker's populated-v4 test covers it.
+- **Blocking: binding fails in MetaMask unless the wallet is already on chain 852.**
+  - MetaMask's typed-data validation (`MetaMask/core`, `packages/signature-controller/src/utils/validation.ts:177`) throws "Provided chainId … must match the active chainId" when `domain.chainId` differs from the wallet's active chain.
+  - Probe: a MetaMask-like provider on chain 1 that does not know 852 made calls `eth_requestAccounts,eth_signTypedData_v4`; the form was not submitted ("The wallet did not sign.").
+  - **This is the planner's error, not the worker's:** the T14 prompt said the user never switches network. D-27 is amended the same day.
+  - **Fix shown to work** on a patched copy of the script: call `wallet_switchEthereumChain` with `0x354`; on 4902, call `wallet_addEthereumChain`; then sign. The calls were then `eth_requestAccounts,wallet_switchEthereumChain,wallet_addEthereumChain,eth_signTypedData_v4`, and the bind was confirmed.
+- **Disclosed by the worker, not blocking:** an expiry by the check can race a still-running submit, so the chain is bound while the records say `expired`. It heals itself: `expired` is not active, so binding the same wallet again takes the own-key `WalletAlreadyBound` path to `confirmed`.
+- **Not verified:** a real browser wallet. A-5 covers it on the deployed service.
 
 ---
 
