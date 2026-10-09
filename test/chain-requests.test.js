@@ -91,6 +91,7 @@ function mockChain(real) {
     async submit(fn, args) {
       chain.calls.submit += 1;
       chain.submitted.push({ fn, args });
+      if (chain.fail) throw new Error("lost");
       if (chain.onSubmit) chain.onSubmit(fn, args);
       if (chain.hold) await chain.hold;
       return chain.next;
@@ -335,6 +336,16 @@ function seedParties(ctx) {
 function onChainOffer(ctx, spec) {
   const offer = draft(ctx.records, "kings", spec);
   return publishOnChain(ctx.records, offer, address(KEYS.seller));
+}
+
+async function linkRequest(ctx) {
+  seedParties(ctx);
+  const offer = onChainOffer(ctx);
+  const request = makeRequest(ctx, offer);
+  await prepare(ctx, request.id, ctx.buyer);
+  const signed = await signPage(ctx, ctx.buyer, KEYS.buyer, request.id);
+  assert.equal(signed.response.location, `/chain/requests/${request.id}?result=recorded`);
+  return { offer, request };
 }
 
 function makeRequest(ctx, offer, quantity = 2) {
@@ -876,6 +887,77 @@ describe("acceptance retry and the accept gate", () => {
       const expired = await post(ctx.base, ctx.buyer.cookie, `/chain/requests/${other.id}/check`, { csrf_token: ctx.buyer.csrf });
       assert.match(expired.location, /result=expired/);
       assert.equal(ctx.records.chainRequestFor(other.id).actions[0].status, "expired");
+    });
+  });
+
+  it("expires a lost acceptance without waiting out its proposal deadline", async () => {
+    await withApp(async (ctx) => {
+      const { request } = await linkRequest(ctx);
+      await signPage(ctx, ctx.buyer, KEYS.buyer, request.id);
+      ctx.chain.fail = true;
+      const lost = await signPage(ctx, ctx.seller, KEYS.seller, request.id);
+      assert.match(lost.response.location, /result=pending/);
+      assert.equal(ctx.records.getRequestFor("kings", request.id).state, "accepted");
+      const action = ctx.records.chainRequestFor(request.id).actions.find((entry) => entry.kind === "acceptance");
+      assert.equal(action.status, "submitting");
+      assert.equal(action.txHash, null);
+      assert.ok(action.deadline > Math.floor(ctx.clock.now / 1000) + 24 * 60 * 60);
+      ctx.records.transact((data) => {
+        const row = data.requests[request.id].chain.actions.find((entry) => entry.kind === "acceptance");
+        row.createdAt = new Date(ctx.clock.now).toISOString();
+      });
+      const early = await post(ctx.base, ctx.seller.cookie, `/chain/requests/${request.id}/check`, { csrf_token: ctx.seller.csrf });
+      assert.match(early.location, /result=unchanged/);
+      ctx.clock.now += 3 * 60 * 1000;
+      const expired = await post(ctx.base, ctx.seller.cookie, `/chain/requests/${request.id}/check`, { csrf_token: ctx.seller.csrf });
+      assert.match(expired.location, /result=expired/);
+      assert.equal(ctx.records.chainRequestFor(request.id).actions.find((entry) => entry.kind === "acceptance").status, "expired");
+      ctx.chain.fail = false;
+      ctx.chain.next = { state: "confirmed", hash: HASH };
+      const again = await signPage(ctx, ctx.seller, KEYS.seller, request.id);
+      assert.match(again.response.location, /result=recorded/);
+      assert.equal(ctx.records.chainRequestFor(request.id).confirmed.status, "accepted");
+    });
+  });
+
+  it("does not ask the seller to record a version the chain has already left", async () => {
+    await withApp(async (ctx) => {
+      seedParties(ctx);
+      const offer = onChainOffer(ctx);
+      const request = makeRequest(ctx, offer);
+      ctx.records.transact((data) => {
+        data.offers[offer.id].chain.confirmed.version = 2;
+      });
+      const stale = await get(ctx.base, ctx.buyer.cookie, `/chain/requests/${request.id}`);
+      assert.match(stale.html, /This acceptance cannot be recorded/);
+      assert.equal(stale.html.includes("records this version"), false);
+      ctx.records.transact((data) => {
+        data.offers[offer.id].chain.confirmed = { version: null, state: "published", stateSeq: 0 };
+      });
+      const missing = await get(ctx.base, ctx.buyer.cookie, `/chain/requests/${request.id}`);
+      assert.match(missing.html, /records this version on chain/);
+    });
+  });
+
+  it("does not offer acceptance while the offer is paused off chain", async () => {
+    await withApp(async (ctx) => {
+      const { request, offer } = await linkRequest(ctx);
+      await signPage(ctx, ctx.buyer, KEYS.buyer, request.id);
+      ctx.records.setOfferState("kings", offer.id, "paused", "user-owner", TODAY);
+      const before = fileBytes(ctx);
+      const page = await get(ctx.base, ctx.seller.cookie, `/chain/requests/${request.id}`);
+      assert.match(page.html, /This offer is not published/);
+      assert.equal(page.html.includes("Accept and sign"), false);
+      const posted = await post(ctx.base, ctx.seller.cookie, `/chain/requests/${request.id}/sign`, {
+        csrf_token: ctx.seller.csrf,
+        kind: "accept",
+        deadline: String(Math.floor(ctx.clock.now / 1000) + 600),
+        signature: "0x" + "66".repeat(65),
+      });
+      assert.match(posted.location, /result=offer_closed/);
+      assert.equal(fileBytes(ctx).equals(before), true);
+      assert.equal(ctx.chain.calls.submit, 1);
+      assert.equal(ctx.records.getRequestFor("kings", request.id).state, "pending");
     });
   });
 });
