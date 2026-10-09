@@ -609,6 +609,11 @@ Neither the planner nor any worker handles a private key.
 
 **Rules:**
 - **Entry point.** "Publish on chain" is offered only for a **draft**: off-chain publish and chain `publishOffer` happen together. Planner default: an offer already published off-chain is not put on chain later. This keeps the rule that chain version *n* is off-chain version *n*.
+- **A failed publish can be retried.** *Added 2026-10-08, from Bugbot on the D-28 PR:* the draft-only rule governs only entry, when `offerKey` is created.
+  - While an offer has a chain record and no `publish` action is `confirmed`, and none is `submitting` or `pending`, the next required action is `publish` again, with a fresh signature, even though the offer is no longer a draft. This covers a previous publish that ended `refused`, `reverted` or `expired`. A failed `publishOffer` leaves no state on chain, so the same `offerKey` is still new.
+  - A retry records on chain only; the offer is already published off-chain.
+  - It commits version 1, and later versions and the state follow in order.
+  - If version 1's `expiresAt` has passed, the offer cannot be recorded, and the chain page says so.
 - **Who and when.**
   - It needs: the chain `ready`; the seller company holding a `confirmed` wallet (C-16); and a signature recovered from one of the company's `confirmed` wallets.
   - A signature from any other address is refused before anything is written or sent.
@@ -1090,7 +1095,7 @@ offers[id].chain = {
 **Routes** (all signed in; for another company's offer, or one that does not exist, each returns the same byte-identical 404 as the offer routes, D-12):
 - `GET /chain/offers/:id`: the offer's chain page. It shows the confirmed chain state, the actions, and the next required step with its sign form. It is a wallet page: the D-27 script and CSP, with the script only when a signature is possible.
 - `POST /chain/offers/:id/prepare`: creates `offerKey` (and so marks the offer on chain) and the salt for the next version, as needed. Then 303.
-- `POST /chain/offers/:id/sign`: fields `csrf_token`, `kind`, `deadline`, `signature`. The server rebuilds the message from the records and recovers the signer. For `publish`, the same flow also publishes off-chain. Then 303.
+- `POST /chain/offers/:id/sign`: fields `csrf_token`, `kind`, `deadline`, `signature`. The server rebuilds the message from the records and recovers the signer. For `publish` on a draft, the same flow also publishes off-chain. A publish retry (D-28) records on chain only. Then 303.
 - `POST /chain/offers/:id/check`: resolves in-flight actions and calls `markExpired` when due. Then 303.
 
 The offer page and the marketplace detail page link to the chain page and show its state. These are additive changes to their views.
