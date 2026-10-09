@@ -574,6 +574,72 @@ describe("chain offer signing", () => {
       const expiredRetry = await post(ctx.base, ctx.kings.cookie, `/chain/offers/${expiredOffer.id}/sign`, signFields(ctx, ctx.kings, KEYS.wallet, expiredOffer, "publish", deadlineIn(ctx, 600)));
       assert.equal(expiredRetry.location, `/chain/offers/${expiredOffer.id}?result=recorded`);
       assert.equal(ctx.records.chainOfferFor(expiredOffer.id).confirmed.state, "published");
+
+      const landedOffer = draft(ctx.records);
+      await prepare(ctx, landedOffer);
+      ctx.chain.next = { state: "pending", hash: HASH };
+      await post(ctx.base, ctx.kings.cookie, `/chain/offers/${landedOffer.id}/sign`, signFields(ctx, ctx.kings, KEYS.wallet, landedOffer, "publish", deadlineIn(ctx, 600)));
+      ctx.clock.now += 20 * 60 * 1000;
+      await post(ctx.base, ctx.kings.cookie, `/chain/offers/${landedOffer.id}/check`, { csrf_token: ctx.kings.csrf });
+      assert.equal(ctx.records.chainOfferFor(landedOffer.id).actions.at(-1).status, "expired");
+      ctx.clock.now -= 20 * 60 * 1000;
+      const companyKey = ctx.records.companyKeyFor("kings");
+      const commitment = ctx.records.commitmentFor(landedOffer.id, 1);
+      ctx.chain.offerOnChain = [companyKey, 1, 0, 1, expiresAtOf("2099-12-31"), commitment];
+      ctx.chain.next = { state: "refused", error: { name: "DuplicateOffer" } };
+      const adopted = await post(ctx.base, ctx.kings.cookie, `/chain/offers/${landedOffer.id}/sign`, signFields(ctx, ctx.kings, KEYS.wallet, landedOffer, "publish", deadlineIn(ctx, 600)));
+      assert.equal(adopted.location, `/chain/offers/${landedOffer.id}?result=recorded`);
+      assert.equal(ctx.records.chainOfferFor(landedOffer.id).confirmed.version, 1);
+      assert.equal(ctx.records.chainOfferFor(landedOffer.id).confirmed.state, "published");
+    });
+  });
+
+  it("retries expiry after a thrown send or a reverted receipt", async () => {
+    await withApp(async (ctx) => {
+      bindWallet(ctx.records, "kings", checksumAddress(openKey(KEYS.wallet).address), "confirmed");
+      const offer = draft(ctx.records);
+      const paused = draft(ctx.records);
+      await prepare(ctx, offer);
+      await prepare(ctx, paused);
+      ctx.chain.next = { state: "confirmed", hash: HASH };
+      const published = await post(ctx.base, ctx.kings.cookie, `/chain/offers/${offer.id}/sign`, signFields(ctx, ctx.kings, KEYS.wallet, offer, "publish", deadlineIn(ctx, 600)));
+      assert.equal(published.location, `/chain/offers/${offer.id}?result=recorded`);
+      const publishedToo = await post(ctx.base, ctx.kings.cookie, `/chain/offers/${paused.id}/sign`, signFields(ctx, ctx.kings, KEYS.wallet, paused, "publish", deadlineIn(ctx, 500)));
+      assert.equal(publishedToo.location, `/chain/offers/${paused.id}?result=recorded`);
+      ctx.clock.now = (expiresAtOf("2099-12-31") + 120) * 1000;
+
+      const original = ctx.chain.submit.bind(ctx.chain);
+      let failed = false;
+      ctx.chain.submit = async (fn, args) => {
+        if (!failed && fn === "markExpired") {
+          failed = true;
+          ctx.chain.calls.submit += 1;
+          ctx.chain.submitted.push({ fn, args });
+          throw new Error("chain_unavailable");
+        }
+        return original(fn, args);
+      };
+      const thrown = await post(ctx.base, ctx.kings.cookie, `/chain/offers/${offer.id}/check`, { csrf_token: ctx.kings.csrf });
+      assert.equal(thrown.location, `/chain/offers/${offer.id}?result=refused`);
+      assert.equal(ctx.records.chainOfferFor(offer.id).actions.at(-1).status, "refused");
+      ctx.chain.next = { state: "confirmed", hash: HASH };
+      const retried = await post(ctx.base, ctx.kings.cookie, `/chain/offers/${offer.id}/check`, { csrf_token: ctx.kings.csrf });
+      assert.equal(retried.location, `/chain/offers/${offer.id}?result=recorded`);
+      assert.equal(ctx.records.chainOfferFor(offer.id).confirmed.state, "expired");
+
+      ctx.chain.submit = original;
+      ctx.chain.next = { state: "pending", hash: HASH };
+      ctx.chain.receiptState = { state: "reverted" };
+      const sent = await post(ctx.base, ctx.kings.cookie, `/chain/offers/${paused.id}/check`, { csrf_token: ctx.kings.csrf });
+      assert.equal(sent.location, `/chain/offers/${paused.id}?result=pending`);
+      const reverted = await post(ctx.base, ctx.kings.cookie, `/chain/offers/${paused.id}/check`, { csrf_token: ctx.kings.csrf });
+      assert.equal(reverted.location, `/chain/offers/${paused.id}?result=reverted`);
+      assert.equal(ctx.records.chainOfferFor(paused.id).actions.at(-1).status, "reverted");
+      ctx.chain.next = { state: "confirmed", hash: HASH };
+      ctx.chain.receiptState = { state: "confirmed" };
+      const resumed = await post(ctx.base, ctx.kings.cookie, `/chain/offers/${paused.id}/check`, { csrf_token: ctx.kings.csrf });
+      assert.equal(resumed.location, `/chain/offers/${paused.id}?result=recorded`);
+      assert.equal(ctx.records.chainOfferFor(paused.id).confirmed.state, "expired");
     });
   });
 
