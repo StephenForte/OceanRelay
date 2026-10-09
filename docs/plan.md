@@ -137,7 +137,7 @@ Tasks, in order. Each runs after the previous one merges.
 | O-11 | **The operator added** the 4 chain secrets to Render. `/config` shows `chain.state: "ready"`, and the Access values were tested from the Render Shell (HTTP 200). | operator | — | **done 2026-10-08**; planner verified (§7) |
 | T14 | Wallet binding (D-27, C-16): `/wallet` with the wallet-page script and its CSP (D-25), the EIP-712 `Binding` signed in the browser and co-signed by the registrar, records schema 5 (`companies`), and the `wallet.bound` audit event | `lib/routes/wallet.js`, `lib/views/wallet.js`, the script | **strongest** (raised from strong: a migration, the authorization boundary T15 relies on, and the first page script) | **approved 2026-10-08**: PR #53 at `e41aff8`, after two rounds (§6). Prompt: `docs/prompts/T14-wallet-binding.md`. |
 | T15 | Offers on chain (D-28, C-17): `/chain/offers/:id` signing pages, salted offer keys and version commitments (C-10 canonical form, buyer-visible only), publish from a draft, `publishVersion` in order, pause and resume, `markExpired`, records schema 6, and the chain line on the offer and marketplace pages | `lib/routes/chain-offers.js`, `lib/views/chain-offers.js`, the commitment module | strongest | **approved 2026-10-09**: PR #57 at `0846c8b`, after two rounds (§6). Prompt: `docs/prompts/T15-offers-on-chain.md`. |
-| T17 | Requests on chain (split from T15 by operator decision, D-28): `recordRequest`, the two-signature acceptance (the proposer signs at request or counter, the accepter at accept), carrier status, and the two-signature cancellation, on `/chain/…` signing pages | — | strongest | after T15 |
+| T17 | Requests on chain (D-29, C-18): `/chain/requests/:id` signing pages; linking with `recordRequest`; the two-signature acceptance (the proposer signs the terms, the accepter signs with "Accept and sign"), with the commitment over C-10's exact `termsHash`; signed carrier statuses in order; the two-signature cancellation; the existing accept route gated for on-chain offers; records schema 7 | `lib/routes/chain-requests.js`, `lib/views/chain-requests.js` | strongest | **ready 2026-10-09**: `docs/prompts/T17-requests-on-chain.md`. Dispatch after this docs PR merges. |
 | T16 | Operator reconciliation: compare the records with chain events and flag mismatches; a repair is an audited correction | — | strong | after T17 |
 | A-5 | Phase 5 acceptance on the deployed service | operator | — | after T16 |
 
@@ -1089,6 +1089,21 @@ The operator reported every step passed:
   - it matches none of the Anvil/Hardhat default-mnemonic accounts 0–29, nor the owner, relayer or registrar;
   - it had sent one earlier transaction on 852 (nonce 1), so it had been used on this chain before. The planner asked the operator to make sure its key is not stored anywhere shared, because a bound wallet signs as the company.
 - This is the first end-to-end proof of the path: browser wallet, registrar co-signature, relayer, confirmed on chain.
+
+### 2026-10-09 — The first real offer on chain 852 (operator), verified by the planner (A-5 evidence)
+
+- **What the operator did:** after T15 deployed, published a new draft with "Publish on chain".
+- **Planner checks against the sequencer:**
+  - transaction `0x780ab428b990b2d79d57b5a78d9a4bb3aa5ba96599ce55657f8298c77adaac94`: status 1, block 2,042,451, 128,672 gas, from the relayer to the ledger, calling `publishOffer` (`0x5c229f1b`);
+  - it emitted `OfferPublished` with offer key `0xa3d7…8774`, company key `0x34b6…fbac` (the company bound on 2026-10-08), signer `0xb849…D019` (the bound wallet), and version 1;
+  - `getOffer` returns the same company key, version 1, `stateSeq` 0, Published, `expiresAt` 1794182399 (2026-11-08 23:59:59 UTC, the end of the deadline day per D-28), and commitment `0x6792…e872`;
+  - the signature deadline was about 10 minutes after the block time;
+  - nothing on chain carries a price, quantity or name.
+- **The commitment, checked against the real terms without the salt leaving the server:**
+  - the operator ran a read-only `node -e` in the Render Shell; it reads the records JSON and calls `lib/commitment.js` for the offer key;
+  - result: `MATCH: version 1 commitment equals the chain`;
+  - the planner tested the command first on a throwaway file: MATCH for the right commitment, MISMATCH for a wrong one, and the file left byte-identical.
+- This is the PRD's Phase 5 "how you know it's done" for a publish: verifiable on chain 852, committing to the off-chain version, with price, margin, company and customer unreadable.
 
 ---
 

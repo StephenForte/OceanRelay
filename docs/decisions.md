@@ -637,6 +637,89 @@ Neither the planner nor any worker handles a private key.
 - **Chain not ready:** the chain pages say recording is unavailable, and nothing is signed or sent. Everything off-chain works as before (D-26).
 - **Not in T15:** requests and everything after them (T17); withdrawing on chain (there is no off-chain withdraw); operator wallets (none are registered yet; the owner's `setOperator`); reconciliation (T16).
 
+### D-29 — Requests on chain: linked requests, two-signature acceptance, statuses and cancellation (2026-10-09)
+
+**Builds on the operator's D-28 decisions:**
+- once an offer is on chain, its requests' acceptances, statuses and cancellations are recorded only with the parties' signatures;
+- signing happens on `/chain/…` wallet pages.
+- The PRD adds: "accepting a request that is linked on-chain requires the bound wallet."
+
+**Facts it rests on** (planner, from `contracts/src/OceanRelayLedger.sol` on `main`):
+- `recordRequest(requestId, offerId, version, deadline, sig)`:
+  - the signer is bound to a company other than the offer's;
+  - the offer is Published at exactly `version`;
+  - `requestId` is new and non-zero;
+  - the request becomes Requested.
+- `recordAcceptance(requestId, counter, termsCommitment, deadline, sigA, sigB)`:
+  - two different signers over one `Acceptance` digest, one bound to the seller's company and one to the buyer's, in either order;
+  - the request is Requested, and the offer is still Published at the request's version;
+  - the request becomes Accepted, storing the commitment.
+- `recordStatus(requestId, status, seq, deadline, sig)`:
+  - the signer is bound to either company, or is a registered operator;
+  - `seq` equals the request's status count;
+  - only D-20's moves are allowed.
+- `recordCancellation(requestId, deadline, sigA, sigB)`: both companies sign one digest, from Accepted, CarrierPending, CarrierConfirmed, Rejected or Rolled.
+- There is no on-chain decline, withdraw, counter or dispute.
+- Off-chain (C-9, C-11): the buyer requests; the seller accepts, declines or counters; the buyer accepts or declines a counter. After acceptance, either party records carrier statuses, and cancellation needs both. `acceptance.termsHash` is C-10's hash, computed at acceptance.
+
+**Rules:**
+- **Which requests.** D-29 applies only to a request on an on-chain offer (C-17). Requests on other offers stay off-chain, unchanged.
+- **Linking.**
+  - The buyer links a request by signing `Request` on `/chain/requests/:id`. It is offered only when the offer's chain record is `confirmed` at the request's pinned version and its chain state is Published.
+  - The `requestKey` is 32 random bytes, created once by a POST, never derived from the request id.
+  - The signer must be one of the buyer company's `confirmed` wallets.
+  - If the seller has not yet put the pinned version on chain, the request cannot be linked until they do.
+- **Accepting needs both signatures.**
+  - The existing accept routes refuse a request on an on-chain offer, and point to the chain page instead. This is the PRD's "requires the bound wallet".
+  - A request that cannot be linked therefore cannot be accepted until it can be. The marketplace detail of an on-chain offer says this before a buyer requests: "Requests on this offer are recorded on ForteL2 Sepolia. Both companies need a bound wallet to accept."
+- **The two signatures, collected lazily.**
+  - The terms being accepted are the request's current terms: the listed terms (counter `null`, chain counter 0) or counter *n* (chain counter *n*).
+  - The **proposer** signs first: the buyer for the listed terms, the seller for a counter. The proposal signature is stored (C-18) and not sent.
+  - It covers `Acceptance(requestKey, counter, termsCommitment, deadline)`, where:
+    - `termsCommitment = keccak256(salt_c ‖ termsHash_c)`;
+    - `termsHash_c` is C-10's SHA-256 of `buyerTermsFor` for those terms, exactly as off-chain acceptance computes it;
+    - `salt_c` is 32 random bytes per counter, created by a POST;
+    - `deadline` = min(the pinned version's `expiresAt`, now + 14 days).
+  - A counter made after a proposal makes that proposal irrelevant.
+  - An expired proposal is signed again.
+  - The **accepter** then signs the same message on the chain page with "Accept and sign". In one flow *(order amended 2026-10-09, from Bugbot on the D-29 PR)*:
+    1. **Check everything that can be checked before any write:**
+       - both signers (seller company and buyer company, each a `confirmed` wallet);
+       - the request linked and `confirmed`;
+       - the offer's chain record `confirmed` at the pinned version and Published, with no offer action in flight;
+       - the proposal present and its deadline still in the future;
+       - the `termsHash` of the request's current terms, computed now exactly as `acceptRequest` will store it, equal to the proposal's `termsHash_c`.
+       Any failure is refused with nothing written or sent.
+    2. One transaction does the off-chain accept (reusing `acceptRequest`'s rules, D-18 availability included) and writes the `submitting` action. If the off-chain accept is refused, nothing is written or sent.
+    3. Assert that the stored `acceptance.termsHash` equals the proposal's `termsHash_c`. This is a final guard; step 1 makes a mismatch impossible in practice.
+    4. Submit `recordAcceptance`.
+    5. Apply the result.
+  - **A failed acceptance can be retried on chain only.** The off-chain accept is final, so a `refused`, `reverted` or `expired` acceptance must not be a dead end.
+    - While the request is accepted off-chain and no acceptance action is `confirmed`, `submitting` or `pending`, the next step is "Record acceptance". It records on chain only.
+    - The stored proposal is reused while its deadline is open; otherwise the proposer signs the same terms again first.
+    - The accepter signs again; their signature is never stored.
+    - The step stays available until it confirms.
+    - **When the chain can no longer accept it**, because the offer's chain version has moved past the pinned version (`StaleVersion`) or the request is not `Requested` on chain, the page says the acceptance cannot be recorded. That is a T16 case.
+    - **While the offer is not Published on chain** (for example, paused on chain while resumed off-chain), the page says the seller must first record the offer's state.
+  - The salts and the proposal signatures never leave the server except as calldata.
+- **Statuses lag, like D-28's offer states.**
+  - Off-chain carrier statuses still happen at once.
+  - The chain page derives the next unsigned status from `fulfilment.history`, in order, with `seq` = the chain's status count.
+  - Either party's `confirmed` wallet may sign any carrier status, including one the operator recorded off-chain. There is no operator wallet yet.
+- **Cancellation, lazily as well.**
+  - When the off-chain request reaches `cancelled`, the chain page asks either party to sign `Cancellation(requestKey, deadline)`, with `deadline` = now + 7 days. That signature is stored; the other party's signature over the same message submits `recordCancellation`.
+  - An expired first signature is signed again.
+  - Once the off-chain request is cancelled, cancellation comes before any status that was never signed; those stay unrecorded, a T16 case.
+- **Mechanics, as in D-27 and D-28:**
+  - each user signature's `deadline` is in (now, now + 15 min], except the long-lived proposal and cancellation deadlines above;
+  - one chain action per request in flight;
+  - write `submitting`, then submit, then apply the result; results map as in D-27;
+  - an explicit check POST resolves by receipt, or by `getRequest` after the deadline;
+  - pages never write and make no RPC call;
+  - the server rebuilds every signed message from the records;
+  - with the chain not ready, nothing is signed and off-chain behaviour is unchanged, except that accepting a request on an on-chain offer waits for the chain.
+- **Not in T17:** operator wallets; reconciliation and repair (T16); disputes on chain (there are none); a request on an offer that is not on chain.
+
 ## Interface contracts
 
 A contract is the surface other tasks build on. The task named as owner publishes it; later
@@ -1101,3 +1184,44 @@ offers[id].chain = {
 The offer page and the marketplace detail page link to the chain page and show its state. These are additive changes to their views.
 
 **Extension to C-12:** a new event, `offer.chain_recorded`. It is written when an action becomes `confirmed`. Actor: the seller's `sub` and company, role `seller` (`expire` has the actor of whoever ran the check). Subject: `offerId` and `version`. `detail.to` is the action kind or the new state.
+
+### C-18 — On-chain request record, schema v7 (owner: T17; implements D-29; extends C-9, C-11 and C-12; consumed by T16)
+
+**Records file, schema 7.** A request may carry `chain`. A request without it is off-chain only.
+
+```
+requests[id].chain = {
+  requestKey: "0x" + 64 hex,               // D-29; random, never changes
+  linkedBy: sub, createdAt: ISO,
+  salts: { "<counter>": "0x" + 64 hex },   // "0" for the listed terms, "n" for counter n
+  proposals: { "<counter>": { signer, deadline, signature, termsHash, at } },   // stored until used or replaced
+  cancelProposal: null | { signer, deadline, signature, at },
+  confirmed: { recorded: bool, acceptedCounter: n | null, status: C-11 status | null, statusSeq: k, cancelled: bool },
+  actions: [ {
+    id, kind: "request" | "acceptance" | "status" | "cancellation",
+    counter: n | null, to: C-11 status | null, seq: k | null,
+    signers: [EIP-55 address], deadline: unix seconds,
+    status: "submitting" | "pending" | "confirmed" | "reverted" | "refused" | "expired",
+    txHash, error, createdAt, updatedAt
+  } ]
+}
+```
+
+- **Migration 6 → 7:** no request changes; it sets `schemaVersion` 7 and writes the backup first (`M7_BAK_SUFFIX`). Schema 1–7 is read; anything above 7 is refused.
+- A used proposal or cancellation signature is removed once its action is `confirmed`.
+- `confirmed` changes only when an action becomes `confirmed`.
+- **For T16:** `records.chainRequestFor(requestId)` returns a copy of `chain` without signatures, or `null`.
+- The termsCommitment function is C-17's commitment module (`keccak256(salt ‖ sha256(canonical))`), called over the acceptance fields.
+
+**Routes** (signed in; only the request's buyer or seller company may see a request's page; anyone else gets the same byte-identical 404 as `/requests/:id`):
+- `GET /chain/requests/:id`: a wallet page (the D-27 script and CSP, the script only when the viewer can sign). It shows the chain state, the actions, and the viewer's next step: Prepare, Link, Sign terms, Accept and sign, Sign status, Sign cancellation, Check, waiting for the other party, or none.
+- `POST /chain/requests/:id/prepare`: creates `requestKey` and the salt for the current counter, as needed. Then 303.
+- `POST /chain/requests/:id/sign`: fields `csrf_token`, `kind` (`request`, `proposal`, `accept`, `status`, `cancellation`), `deadline`, `signature`. The server rebuilds the message. For `accept`, the same flow accepts off-chain, after D-29's pre-checks; a retry (`kind` `accept` once already accepted off-chain) records on chain only. Then 303.
+- `POST /chain/requests/:id/check`: resolves in-flight actions. Then 303.
+
+**Changes to existing routes, additive only:**
+- `POST /requests/:id/accept` refuses a request on an on-chain offer and redirects (303) to its chain page; nothing is written.
+- The request page links to the chain page and shows its state.
+- The marketplace detail of an on-chain offer shows D-29's sentence.
+
+**Extension to C-12:** a new event, `request.chain_recorded`. It is written when an action becomes `confirmed`. Actor: the user who ran it, role `buyer` or `seller`. Subject: `offerId`, `requestId` and `version`. `detail.to` is the action kind, or the status.
