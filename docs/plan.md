@@ -136,8 +136,9 @@ Tasks, in order. Each runs after the previous one merges.
 | T13 | Chain client (C-15, D-26): read and write RPCs, relayer EIP-1559 signing and registrar EIP-712 signing (`@noble/*`, exact pins, lockfile), sequencer receipts, the refused/pending/confirmed/reverted model, startup checks against `deployments/fortel2-sepolia.json`, `/config` chain status, Node pinned to 26.x, F-17 README fixes. It must match T12's vectors byte for byte. | `lib/chain/**`, `contracts/abi/` | strongest | **merged 2026-10-08**: PR #51 at `d310ee2` (merge `efba765`), after three rounds (§6). Prompt: `docs/prompts/T13-chain-client.md`. |
 | O-11 | **The operator added** the 4 chain secrets to Render. `/config` shows `chain.state: "ready"`, and the Access values were tested from the Render Shell (HTTP 200). | operator | — | **done 2026-10-08**; planner verified (§7) |
 | T14 | Wallet binding (D-27, C-16): `/wallet` with the wallet-page script and its CSP (D-25), the EIP-712 `Binding` signed in the browser and co-signed by the registrar, records schema 5 (`companies`), and the `wallet.bound` audit event | `lib/routes/wallet.js`, `lib/views/wallet.js`, the script | **strongest** (raised from strong: a migration, the authorization boundary T15 relies on, and the first page script) | **approved 2026-10-08**: PR #53 at `e41aff8`, after two rounds (§6). Prompt: `docs/prompts/T14-wallet-binding.md`. |
-| T15 | Publish, version, state, request, acceptance, status and cancellation recorded on chain, with pending, confirmed and failed shown in the UI | — | strongest | after T14 |
-| T16 | Operator reconciliation: compare the records with chain events and flag mismatches; a repair is an audited correction | — | strong | after T15 |
+| T15 | Offers on chain (D-28, C-17): `/chain/offers/:id` signing pages, salted offer keys and version commitments (C-10 canonical form, buyer-visible only), publish from a draft, `publishVersion` in order, pause and resume, `markExpired`, records schema 6, and the chain line on the offer and marketplace pages | `lib/routes/chain-offers.js`, `lib/views/chain-offers.js`, the commitment module | strongest | **ready 2026-10-08**: `docs/prompts/T15-offers-on-chain.md`. Dispatch after this docs PR merges. |
+| T17 | Requests on chain (split from T15 by operator decision, D-28): `recordRequest`, the two-signature acceptance (the proposer signs at request or counter, the accepter at accept), carrier status, and the two-signature cancellation, on `/chain/…` signing pages | — | strongest | after T15 |
+| T16 | Operator reconciliation: compare the records with chain events and flag mismatches; a repair is an audited correction | — | strong | after T17 |
 | A-5 | Phase 5 acceptance on the deployed service | operator | — | after T16 |
 
 ### Phase 5 inputs
@@ -1045,6 +1046,19 @@ The operator reported every step passed:
   - wrong values return HTTP 403 with Cloudflare's HTML error page. The planner checked that case with fake values.
   - This check matters because `ready` alone does not prove the Access values: D-26's startup check never contacts the write host.
 - Phase 5 can now send transactions from the deployed service. T14 is next.
+
+### 2026-10-08 — The first real wallet binding on chain 852 (operator), verified by the planner (A-5 evidence)
+
+- **What the operator did:** after T14 deployed (`main` `4f03547`), bound a browser wallet through `/wallet`.
+- **Planner checks against the sequencer:**
+  - transaction `0xf0672d0165d543c10e526b80463d3155061e9f3af3e5b0cbc39aa745784fe45d`: status 1, block 2,035,541, 87,354 gas;
+  - sent by the relayer `0xf8B8…8ae2` to the ledger, calling `bindWallet` (selector `0x8aa50b38`);
+  - it emitted one `WalletBound` with company key `0x34b6…fbac` and wallet `0xb84982a02A96c88676df643B6eE6B691BcDED019`;
+  - `walletCompany(wallet)` returns the same key.
+- **The bound wallet:**
+  - it matches none of the Anvil/Hardhat default-mnemonic accounts 0–29, nor the owner, relayer or registrar;
+  - it had sent one earlier transaction on 852 (nonce 1), so it had been used on this chain before. The planner asked the operator to make sure its key is not stored anywhere shared, because a bound wallet signs as the company.
+- This is the first end-to-end proof of the path: browser wallet, registrar co-signature, relayer, confirmed on chain.
 
 ---
 
