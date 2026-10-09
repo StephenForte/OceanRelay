@@ -717,6 +717,49 @@ describe("chain offer signing", () => {
         assert.equal(sends(ctx), sendsBefore);
       });
     });
+
+    it("sends markExpired when a pause or resume is still unsigned and the offer is due", async () => {
+      await withApp(async (ctx) => {
+        bindWallet(ctx.records, "kings", checksumAddress(openKey(KEYS.wallet).address), "confirmed");
+        const paused = draft(ctx.records);
+        const resumed = draft(ctx.records);
+        await prepare(ctx, paused);
+        await prepare(ctx, resumed);
+        ctx.chain.next = { state: "confirmed", hash: HASH };
+        const published = await post(ctx.base, ctx.kings.cookie, `/chain/offers/${paused.id}/sign`, signFields(ctx, ctx.kings, KEYS.wallet, paused, "publish", deadlineIn(ctx, 600)));
+        assert.equal(published.location, `/chain/offers/${paused.id}?result=recorded`);
+        const publishedToo = await post(ctx.base, ctx.kings.cookie, `/chain/offers/${resumed.id}/sign`, signFields(ctx, ctx.kings, KEYS.wallet, resumed, "publish", deadlineIn(ctx, 500)));
+        assert.equal(publishedToo.location, `/chain/offers/${resumed.id}?result=recorded`);
+        const off = await post(ctx.base, ctx.kings.cookie, `/offers/${paused.id}/state`, { csrf_token: ctx.kings.csrf, to: "paused" });
+        assert.equal(off.status, 302);
+        const offToo = await post(ctx.base, ctx.kings.cookie, `/offers/${resumed.id}/state`, { csrf_token: ctx.kings.csrf, to: "paused" });
+        assert.equal(offToo.status, 302);
+        await prepare(ctx, resumed);
+        const signedPause = await post(ctx.base, ctx.kings.cookie, `/chain/offers/${resumed.id}/sign`, signFields(ctx, ctx.kings, KEYS.wallet, resumed, "state", deadlineIn(ctx, 400)));
+        assert.equal(signedPause.location, `/chain/offers/${resumed.id}?result=recorded`);
+        const on = await post(ctx.base, ctx.kings.cookie, `/offers/${resumed.id}/state`, { csrf_token: ctx.kings.csrf, to: "published" });
+        assert.equal(on.status, 302);
+        const stateSends = ctx.chain.submitted.filter((item) => item.fn === "setOfferState").length;
+        ctx.clock.now = (expiresAtOf("2099-12-31") + 10) * 1000;
+        const companyKey = ctx.records.companyKeyFor("kings");
+        ctx.chain.offerOnChain = [companyKey, 1, 0, 1, expiresAtOf("2099-12-31"), ctx.records.commitmentFor(paused.id, 1)];
+        ctx.chain.next = { state: "pending", hash: HASH };
+        const pausePage = await get(ctx.base, ctx.kings.cookie, `/chain/offers/${paused.id}`);
+        assert.match(pausePage.html, /id="chain-check"/);
+        assert.equal(pausePage.html.includes("chain-sign"), false);
+        const pauseCheck = await check(ctx, paused.id);
+        assert.equal(pauseCheck.location, `/chain/offers/${paused.id}?result=pending`);
+        assert.equal(ctx.chain.submitted.at(-1).fn, "markExpired");
+        ctx.chain.offerOnChain = [companyKey, 1, 1, 2, expiresAtOf("2099-12-31"), ctx.records.commitmentFor(resumed.id, 1)];
+        const resumePage = await get(ctx.base, ctx.kings.cookie, `/chain/offers/${resumed.id}`);
+        assert.match(resumePage.html, /id="chain-check"/);
+        assert.equal(resumePage.html.includes("chain-sign"), false);
+        const resumeCheck = await check(ctx, resumed.id);
+        assert.equal(resumeCheck.location, `/chain/offers/${resumed.id}?result=pending`);
+        assert.equal(ctx.chain.submitted.filter((item) => item.fn === "markExpired").length, 2);
+        assert.equal(ctx.chain.submitted.filter((item) => item.fn === "setOfferState").length, stateSends);
+      });
+    });
   });
 
   it("sends nothing when version 1 is past expiresAt", async () => {
