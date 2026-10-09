@@ -682,13 +682,25 @@ Neither the planner nor any worker handles a private key.
     - `deadline` = min(the pinned version's `expiresAt`, now + 14 days).
   - A counter made after a proposal makes that proposal irrelevant.
   - An expired proposal is signed again.
-  - The **accepter** then signs the same message on the chain page with "Accept and sign". In one flow:
-    1. verify both signers (seller company and buyer company, each a `confirmed` wallet);
-    2. one transaction does the off-chain accept (reusing `acceptRequest`'s rules, D-18 availability included) and writes the `submitting` action;
-    3. assert that the stored `acceptance.termsHash` equals the proposal's `termsHash_c`, refusing before anything is sent if not;
-    4. submit `recordAcceptance`;
-    5. apply the result.
-  - If the off-chain accept is refused, nothing is written or sent.
+  - The **accepter** then signs the same message on the chain page with "Accept and sign". In one flow *(order amended 2026-10-09, from Bugbot on the D-29 PR)*:
+    1. **Check everything that can be checked before any write:**
+       - both signers (seller company and buyer company, each a `confirmed` wallet);
+       - the request linked and `confirmed`;
+       - the offer's chain record `confirmed` at the pinned version and Published, with no offer action in flight;
+       - the proposal present and its deadline still in the future;
+       - the `termsHash` of the request's current terms, computed now exactly as `acceptRequest` will store it, equal to the proposal's `termsHash_c`.
+       Any failure is refused with nothing written or sent.
+    2. One transaction does the off-chain accept (reusing `acceptRequest`'s rules, D-18 availability included) and writes the `submitting` action. If the off-chain accept is refused, nothing is written or sent.
+    3. Assert that the stored `acceptance.termsHash` equals the proposal's `termsHash_c`. This is a final guard; step 1 makes a mismatch impossible in practice.
+    4. Submit `recordAcceptance`.
+    5. Apply the result.
+  - **A failed acceptance can be retried on chain only.** The off-chain accept is final, so a `refused`, `reverted` or `expired` acceptance must not be a dead end.
+    - While the request is accepted off-chain and no acceptance action is `confirmed`, `submitting` or `pending`, the next step is "Record acceptance". It records on chain only.
+    - The stored proposal is reused while its deadline is open; otherwise the proposer signs the same terms again first.
+    - The accepter signs again; their signature is never stored.
+    - The step stays available until it confirms.
+    - **When the chain can no longer accept it**, because the offer's chain version has moved past the pinned version (`StaleVersion`) or the request is not `Requested` on chain, the page says the acceptance cannot be recorded. That is a T16 case.
+    - **While the offer is not Published on chain** (for example, paused on chain while resumed off-chain), the page says the seller must first record the offer's state.
   - The salts and the proposal signatures never leave the server except as calldata.
 - **Statuses lag, like D-28's offer states.**
   - Off-chain carrier statuses still happen at once.
@@ -1204,7 +1216,7 @@ requests[id].chain = {
 **Routes** (signed in; only the request's buyer or seller company may see a request's page; anyone else gets the same byte-identical 404 as `/requests/:id`):
 - `GET /chain/requests/:id`: a wallet page (the D-27 script and CSP, the script only when the viewer can sign). It shows the chain state, the actions, and the viewer's next step: Prepare, Link, Sign terms, Accept and sign, Sign status, Sign cancellation, Check, waiting for the other party, or none.
 - `POST /chain/requests/:id/prepare`: creates `requestKey` and the salt for the current counter, as needed. Then 303.
-- `POST /chain/requests/:id/sign`: fields `csrf_token`, `kind` (`request`, `proposal`, `accept`, `status`, `cancellation`), `deadline`, `signature`. The server rebuilds the message. For `accept`, the same flow accepts off-chain. Then 303.
+- `POST /chain/requests/:id/sign`: fields `csrf_token`, `kind` (`request`, `proposal`, `accept`, `status`, `cancellation`), `deadline`, `signature`. The server rebuilds the message. For `accept`, the same flow accepts off-chain, after D-29's pre-checks; a retry (`kind` `accept` once already accepted off-chain) records on chain only. Then 303.
 - `POST /chain/requests/:id/check`: resolves in-flight actions. Then 303.
 
 **Changes to existing routes, additive only:**
