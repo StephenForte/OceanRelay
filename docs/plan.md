@@ -137,7 +137,7 @@ Tasks, in order. Each runs after the previous one merges.
 | O-11 | **The operator added** the 4 chain secrets to Render. `/config` shows `chain.state: "ready"`, and the Access values were tested from the Render Shell (HTTP 200). | operator | — | **done 2026-10-08**; planner verified (§7) |
 | T14 | Wallet binding (D-27, C-16): `/wallet` with the wallet-page script and its CSP (D-25), the EIP-712 `Binding` signed in the browser and co-signed by the registrar, records schema 5 (`companies`), and the `wallet.bound` audit event | `lib/routes/wallet.js`, `lib/views/wallet.js`, the script | **strongest** (raised from strong: a migration, the authorization boundary T15 relies on, and the first page script) | **approved 2026-10-08**: PR #53 at `e41aff8`, after two rounds (§6). Prompt: `docs/prompts/T14-wallet-binding.md`. |
 | T15 | Offers on chain (D-28, C-17): `/chain/offers/:id` signing pages, salted offer keys and version commitments (C-10 canonical form, buyer-visible only), publish from a draft, `publishVersion` in order, pause and resume, `markExpired`, records schema 6, and the chain line on the offer and marketplace pages | `lib/routes/chain-offers.js`, `lib/views/chain-offers.js`, the commitment module | strongest | **approved 2026-10-09**: PR #57 at `0846c8b`, after two rounds (§6). Prompt: `docs/prompts/T15-offers-on-chain.md`. |
-| T17 | Requests on chain (D-29, C-18): `/chain/requests/:id` signing pages; linking with `recordRequest`; the two-signature acceptance (the proposer signs the terms, the accepter signs with "Accept and sign"), with the commitment over C-10's exact `termsHash`; signed carrier statuses in order; the two-signature cancellation; the existing accept route gated for on-chain offers; records schema 7 | `lib/routes/chain-requests.js`, `lib/views/chain-requests.js` | strongest | **ready 2026-10-09**: `docs/prompts/T17-requests-on-chain.md`. Dispatch after this docs PR merges. |
+| T17 | Requests on chain (D-29, C-18): `/chain/requests/:id` signing pages; linking with `recordRequest`; the two-signature acceptance (the proposer signs the terms, the accepter signs with "Accept and sign"), with the commitment over C-10's exact `termsHash`; signed carrier statuses in order; the two-signature cancellation; the existing accept route gated for on-chain offers; records schema 7 | `lib/routes/chain-requests.js`, `lib/views/chain-requests.js` | strongest | **approved 2026-10-09**: PR #61 at `c23f75e` (§6). Prompt: `docs/prompts/T17-requests-on-chain.md`. |
 | T16 | Operator reconciliation: compare the records with chain events and flag mismatches; a repair is an audited correction | — | strong | after T17 |
 | A-5 | Phase 5 acceptance on the deployed service | operator | — | after T16 |
 
@@ -840,6 +840,23 @@ The operator merged #32 by accident before the planner review. The review then r
 - **Worker-disclosed:** a failed `getOffer` read leaves an expire row in flight until a later check can read it, rather than ageing it; that is correct. `DuplicateOffer` on a retry stays a refusal, a T16 case.
 - **Not verified:** a real browser wallet signing Publish, Version and OfferState. A-5 covers it.
 
+### T17 — PR #61, `c23f75e`: approved 2026-10-09
+
+- **Base and scope:** merge-base `e7bbb5a` = `main`. 20 files, all owned or shared-additive.
+  - `lib/commitment.js` was refactored so offers and acceptances share one path: SHA-256, then `keccak(salt ‖ digest)`. The bytes are unchanged, and T15's offer commitments are unaffected.
+  - The request views omit the off-chain Accept buttons on on-chain offers, and the route gate redirects.
+- **Gate** (planner, scratch clone): `npm test` 299/0/0; `test:chain` 5/5, including "records a request, both acceptances, statuses and cancellation through the HTTP routes"; `forge test` 84; no anvil left running. CI on `c23f75e`: Semgrep, Trivy and Bugbot pass.
+- **Bugbot:** six threads, raised on `064da21`, `1b02a33` and `3d5a4a8` (a failed submit locking acceptance, a stale-offer link reason, a paused offer still offering accept, a lost-submit expiry, a late heal discarding a signature, a failed heal reported as recorded). Each was fixed by a later commit and all are resolved; Bugbot's run on `c23f75e` added none.
+- **Probes** (the planner's own harness; every signature made by `cast wallet sign --data` over the page's own `data-typed` JSON):
+  - **Accept gate:** `POST /requests/:id/accept` on an on-chain offer redirects to `/chain/requests/:id`; the file is byte-identical and there are 0 chain calls.
+  - **Reads:** the chain request page (both parties), the request page and the market detail: no write, 0 chain calls.
+  - **Link:** the buyer's `Request` signature goes out as `recordRequest`.
+  - **The terms hash, independently:** the proposal's typed-data `termsCommitment` equals `cast keccak(salt0 ‖ openssl sha256(C-10 canonical))`, built by hand from the listed terms (quantity 3, 2500, total 7500, counter null). After acceptance, `acceptance.termsHash` equals the same hand-computed SHA-256, and `recordAcceptance` carried that commitment, with counter 0 and two different signatures.
+  - **Proposal deadline:** now + 14 days (the offer's validity runs to 2099).
+  - **Refused, with the file byte-identical and 0 chain calls:** an accept signed by the buyer's own second wallet (`not_signer`); an accept after the proposal's deadline (`expired_proposal`, request still pending); a buyer accept with the pre-counter proposal after the seller countered.
+  - **After a counter:** the seller is offered Prepare and then the counter-1 proposal; the buyer waits.
+- **Not verified:** a real browser wallet for the request flow; A-5 covers it. Operator-signed statuses stay off chain (no operator wallet).
+
 ---
 
 ## 7. Operator reports
@@ -1146,6 +1163,8 @@ This section holds what previously lived only in the planning conversation. It i
   - Running Rate Ninja's own code (its server or scripts) is not permitted in the
     planner session. Test SQL against a scratch SQLite database built from the column
     list instead.
+
+- **A combined off-chain + on-chain action needs a chain-only retry.** Learned 2026-10-09; Bugbot caught it twice, on D-28's publish and on D-29's accept. When one step makes a final off-chain change and then submits to the chain, the decision must also say: (a) every check that can run before the write runs first; (b) a `refused`, `reverted` or `expired` submit leaves a chain-only retry; (c) which chain refusals cannot be retried (a T16 case). Check every future chain decision against this before dispatch.
 
 ### Environment facts
 
