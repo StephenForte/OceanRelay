@@ -574,72 +574,148 @@ describe("chain offer signing", () => {
       const expiredRetry = await post(ctx.base, ctx.kings.cookie, `/chain/offers/${expiredOffer.id}/sign`, signFields(ctx, ctx.kings, KEYS.wallet, expiredOffer, "publish", deadlineIn(ctx, 600)));
       assert.equal(expiredRetry.location, `/chain/offers/${expiredOffer.id}?result=recorded`);
       assert.equal(ctx.records.chainOfferFor(expiredOffer.id).confirmed.state, "published");
-
-      const landedOffer = draft(ctx.records);
-      await prepare(ctx, landedOffer);
-      ctx.chain.next = { state: "pending", hash: HASH };
-      await post(ctx.base, ctx.kings.cookie, `/chain/offers/${landedOffer.id}/sign`, signFields(ctx, ctx.kings, KEYS.wallet, landedOffer, "publish", deadlineIn(ctx, 600)));
-      ctx.clock.now += 20 * 60 * 1000;
-      await post(ctx.base, ctx.kings.cookie, `/chain/offers/${landedOffer.id}/check`, { csrf_token: ctx.kings.csrf });
-      assert.equal(ctx.records.chainOfferFor(landedOffer.id).actions.at(-1).status, "expired");
-      ctx.clock.now -= 20 * 60 * 1000;
-      const companyKey = ctx.records.companyKeyFor("kings");
-      const commitment = ctx.records.commitmentFor(landedOffer.id, 1);
-      ctx.chain.offerOnChain = [companyKey, 1, 0, 1, expiresAtOf("2099-12-31"), commitment];
-      ctx.chain.next = { state: "refused", error: { name: "DuplicateOffer" } };
-      const adopted = await post(ctx.base, ctx.kings.cookie, `/chain/offers/${landedOffer.id}/sign`, signFields(ctx, ctx.kings, KEYS.wallet, landedOffer, "publish", deadlineIn(ctx, 600)));
-      assert.equal(adopted.location, `/chain/offers/${landedOffer.id}?result=recorded`);
-      assert.equal(ctx.records.chainOfferFor(landedOffer.id).confirmed.version, 1);
-      assert.equal(ctx.records.chainOfferFor(landedOffer.id).confirmed.state, "published");
     });
   });
 
-  it("retries expiry after a thrown send or a reverted receipt", async () => {
-    await withApp(async (ctx) => {
+  describe("expire resolution", () => {
+    function expireActions(ctx, id) {
+      return ctx.records.chainOfferFor(id).actions.filter((action) => action.kind === "expire");
+    }
+
+    function inFlight(actions) {
+      return actions.filter((action) => action.status === "submitting" || action.status === "pending");
+    }
+
+    function sends(ctx) {
+      return ctx.chain.submitted.filter((item) => item.fn === "markExpired").length;
+    }
+
+    function stampCreated(ctx, id) {
+      ctx.records.transact((data) => {
+        const action = data.offers[id].chain.actions.find((item) => item.kind === "expire" && (item.status === "pending" || item.status === "submitting"));
+        action.createdAt = new Date(ctx.clock.now).toISOString();
+      });
+    }
+
+    async function published(ctx) {
       bindWallet(ctx.records, "kings", checksumAddress(openKey(KEYS.wallet).address), "confirmed");
       const offer = draft(ctx.records);
-      const paused = draft(ctx.records);
       await prepare(ctx, offer);
-      await prepare(ctx, paused);
       ctx.chain.next = { state: "confirmed", hash: HASH };
-      const published = await post(ctx.base, ctx.kings.cookie, `/chain/offers/${offer.id}/sign`, signFields(ctx, ctx.kings, KEYS.wallet, offer, "publish", deadlineIn(ctx, 600)));
-      assert.equal(published.location, `/chain/offers/${offer.id}?result=recorded`);
-      const publishedToo = await post(ctx.base, ctx.kings.cookie, `/chain/offers/${paused.id}/sign`, signFields(ctx, ctx.kings, KEYS.wallet, paused, "publish", deadlineIn(ctx, 500)));
-      assert.equal(publishedToo.location, `/chain/offers/${paused.id}?result=recorded`);
-      ctx.clock.now = (expiresAtOf("2099-12-31") + 120) * 1000;
+      const response = await post(ctx.base, ctx.kings.cookie, `/chain/offers/${offer.id}/sign`, signFields(ctx, ctx.kings, KEYS.wallet, offer, "publish", deadlineIn(ctx, 600)));
+      assert.equal(response.location, `/chain/offers/${offer.id}?result=recorded`);
+      ctx.clock.now = (expiresAtOf("2099-12-31") + 10) * 1000;
+      const companyKey = ctx.records.companyKeyFor("kings");
+      ctx.chain.offerOnChain = [companyKey, 1, 0, 1, expiresAtOf("2099-12-31"), ctx.records.commitmentFor(offer.id, 1)];
+      return offer;
+    }
 
+    async function check(ctx, id) {
+      const before = sends(ctx);
+      const inflightBefore = inFlight(expireActions(ctx, id)).length;
       const original = ctx.chain.submit.bind(ctx.chain);
-      let failed = false;
       ctx.chain.submit = async (fn, args) => {
-        if (!failed && fn === "markExpired") {
-          failed = true;
-          ctx.chain.calls.submit += 1;
-          ctx.chain.submitted.push({ fn, args });
-          throw new Error("chain_unavailable");
+        if (fn === "markExpired") {
+          const flying = inFlight(expireActions(ctx, id));
+          assert.equal(flying.length, 1);
         }
         return original(fn, args);
       };
-      const thrown = await post(ctx.base, ctx.kings.cookie, `/chain/offers/${offer.id}/check`, { csrf_token: ctx.kings.csrf });
-      assert.equal(thrown.location, `/chain/offers/${offer.id}?result=refused`);
-      assert.equal(ctx.records.chainOfferFor(offer.id).actions.at(-1).status, "refused");
-      ctx.chain.next = { state: "confirmed", hash: HASH };
-      const retried = await post(ctx.base, ctx.kings.cookie, `/chain/offers/${offer.id}/check`, { csrf_token: ctx.kings.csrf });
-      assert.equal(retried.location, `/chain/offers/${offer.id}?result=recorded`);
-      assert.equal(ctx.records.chainOfferFor(offer.id).confirmed.state, "expired");
-
+      const response = await post(ctx.base, ctx.kings.cookie, `/chain/offers/${id}/check`, { csrf_token: ctx.kings.csrf });
       ctx.chain.submit = original;
-      ctx.chain.next = { state: "pending", hash: HASH };
-      ctx.chain.receiptState = { state: "reverted" };
-      const sent = await post(ctx.base, ctx.kings.cookie, `/chain/offers/${paused.id}/check`, { csrf_token: ctx.kings.csrf });
-      assert.equal(sent.location, `/chain/offers/${paused.id}?result=pending`);
-      const reverted = await post(ctx.base, ctx.kings.cookie, `/chain/offers/${paused.id}/check`, { csrf_token: ctx.kings.csrf });
-      assert.equal(reverted.location, `/chain/offers/${paused.id}?result=reverted`);
-      assert.equal(ctx.records.chainOfferFor(paused.id).actions.at(-1).status, "reverted");
-      ctx.chain.next = { state: "confirmed", hash: HASH };
-      ctx.chain.receiptState = { state: "confirmed" };
-      const resumed = await post(ctx.base, ctx.kings.cookie, `/chain/offers/${paused.id}/check`, { csrf_token: ctx.kings.csrf });
-      assert.equal(resumed.location, `/chain/offers/${paused.id}?result=recorded`);
-      assert.equal(ctx.records.chainOfferFor(paused.id).confirmed.state, "expired");
+      if (sends(ctx) > before) assert.equal(inflightBefore, 0);
+      return response;
+    }
+
+    it("expires an undelivered markExpired after the buffer, then the next check sends again", async () => {
+      await withApp(async (ctx) => {
+        const offer = await published(ctx);
+        ctx.chain.next = { state: "pending", hash: HASH };
+        ctx.chain.receiptState = { state: "pending" };
+        const started = await check(ctx, offer.id);
+        assert.equal(started.location, `/chain/offers/${offer.id}?result=pending`);
+        assert.equal(sends(ctx), 1);
+        stampCreated(ctx, offer.id);
+        const waiting = await check(ctx, offer.id);
+        assert.equal(waiting.location, `/chain/offers/${offer.id}?result=unchanged`);
+        assert.equal(expireActions(ctx, offer.id)[0].status, "pending");
+        assert.equal(sends(ctx), 1);
+        assert.equal(inFlight(expireActions(ctx, offer.id)).length, 1);
+        ctx.clock.now += 121 * 1000;
+        const aged = await check(ctx, offer.id);
+        assert.equal(aged.location, `/chain/offers/${offer.id}?result=expired`);
+        assert.equal(expireActions(ctx, offer.id)[0].status, "expired");
+        assert.equal(sends(ctx), 1);
+        const retried = await check(ctx, offer.id);
+        assert.equal(retried.location, `/chain/offers/${offer.id}?result=pending`);
+        assert.equal(sends(ctx), 2);
+        assert.equal(inFlight(expireActions(ctx, offer.id)).length, 1);
+      });
+    });
+
+    it("reverts an expire whose receipt reverted, then the next check sends again", async () => {
+      await withApp(async (ctx) => {
+        const offer = await published(ctx);
+        ctx.chain.next = { state: "pending", hash: HASH };
+        ctx.chain.receiptState = { state: "reverted" };
+        const started = await check(ctx, offer.id);
+        assert.equal(started.location, `/chain/offers/${offer.id}?result=pending`);
+        stampCreated(ctx, offer.id);
+        const reverted = await check(ctx, offer.id);
+        assert.equal(reverted.location, `/chain/offers/${offer.id}?result=reverted`);
+        assert.equal(expireActions(ctx, offer.id)[0].status, "reverted");
+        assert.equal(sends(ctx), 1);
+        const retried = await check(ctx, offer.id);
+        assert.equal(retried.location, `/chain/offers/${offer.id}?result=pending`);
+        assert.equal(sends(ctx), 2);
+        assert.equal(inFlight(expireActions(ctx, offer.id)).length, 1);
+      });
+    });
+
+    it("confirms an expire from its receipt and audits it once", async () => {
+      await withApp(async (ctx) => {
+        const offer = await published(ctx);
+        const before = ctx.records.view((data) => data.audit.filter((entry) => entry.event === "offer.chain_recorded" && entry.subject.offerId === offer.id).length);
+        ctx.chain.next = { state: "pending", hash: HASH };
+        ctx.chain.receiptState = { state: "confirmed" };
+        const started = await check(ctx, offer.id);
+        assert.equal(started.location, `/chain/offers/${offer.id}?result=pending`);
+        const confirmed = await check(ctx, offer.id);
+        assert.equal(confirmed.location, `/chain/offers/${offer.id}?result=recorded`);
+        assert.equal(expireActions(ctx, offer.id)[0].status, "confirmed");
+        assert.equal(ctx.records.chainOfferFor(offer.id).confirmed.state, "expired");
+        const recorded = ctx.records.view((data) => data.audit.filter((entry) => entry.event === "offer.chain_recorded" && entry.subject.offerId === offer.id));
+        assert.equal(recorded.length, before + 1);
+        assert.equal(sends(ctx), 1);
+      });
+    });
+
+    it("confirms an expire with no hash when getOffer shows Expired", async () => {
+      await withApp(async (ctx) => {
+        const offer = await published(ctx);
+        const original = ctx.chain.submit.bind(ctx.chain);
+        ctx.chain.submit = async (fn, args) => {
+          if (fn === "markExpired") {
+            ctx.chain.calls.submit += 1;
+            ctx.chain.submitted.push({ fn, args });
+            throw new Error("lost");
+          }
+          return original(fn, args);
+        };
+        const crashed = await post(ctx.base, ctx.kings.cookie, `/chain/offers/${offer.id}/check`, { csrf_token: ctx.kings.csrf });
+        assert.equal(crashed.location, `/chain/offers/${offer.id}?result=pending`);
+        assert.equal(expireActions(ctx, offer.id)[0].status, "submitting");
+        assert.equal(expireActions(ctx, offer.id)[0].txHash, null);
+        ctx.chain.submit = original;
+        const companyKey = ctx.records.companyKeyFor("kings");
+        ctx.chain.offerOnChain = [companyKey, 1, 0, 4, expiresAtOf("2099-12-31"), ctx.records.commitmentFor(offer.id, 1)];
+        const sendsBefore = sends(ctx);
+        const confirmed = await check(ctx, offer.id);
+        assert.equal(confirmed.location, `/chain/offers/${offer.id}?result=recorded`);
+        assert.equal(expireActions(ctx, offer.id)[0].status, "confirmed");
+        assert.equal(ctx.records.chainOfferFor(offer.id).confirmed.state, "expired");
+        assert.equal(sends(ctx), sendsBefore);
+      });
     });
   });
 
