@@ -41,6 +41,7 @@ Build to **C-17** (the records, routes and audit) and **D-28** (the behaviour).
 - the write methods your routes need, inside synchronous transactions;
 - `offerKey` and each version's salt come from `crypto.randomBytes(32)`, created by a POST.
 - For `publish`, one transaction writes both the off-chain publish (reuse `setOfferState`'s rules; refactor internally if you must, without changing its behaviour) and the `submitting` action. If the off-chain publish is refused, nothing is written and nothing is signed or sent.
+- A publish that ended `refused`, `reverted` or `expired` can be retried (D-28, "A failed publish can be retried"). The retry needs a fresh signature, records on chain only, and keeps the same `offerKey`.
 
 **2. The commitment (D-28):**
 - `commitment(n) = keccak256(salt_n ‖ sha256(canonical_n))`;
@@ -95,6 +96,7 @@ Build to **C-17** (the records, routes and audit) and **D-28** (the behaviour).
 - The chain must receive versions in order, and a state change only with the right `seq`.
 - With versions 2 and 3 off-chain and only 1 confirmed, the next step is version 2. Signing version 3 first is refused.
 - The `submitting` row is written before `submit` is called (assert the order, as T14 did). Two concurrent signs for one offer produce one submit.
+- A failed publish is not a dead end. After a `refused` publish, the offer is published off-chain, and the next step is `publish` again; signing it reaches `confirmed`. The same holds after `reverted`, and after `expired`. If version 1 has passed its `expiresAt`, the page says the offer cannot be recorded, and nothing is sent.
 
 **5. A page view must not write or call the chain.**
 - `GET /chain/offers/:id`, the offer page and the marketplace detail leave the records file byte-identical, with the same mtime, and make zero RPC calls.
@@ -193,6 +195,7 @@ Open a **draft** PR (the repo merges with merge commits). Put this block, filled
     SERVER-BUILT: tampered version/commitment/seq/offerKey → refused, nothing written or sent: yes/no
     SIGNERS:     other company / pending / unbound / relayer / other offer → refused before writing: yes/no
     ORDER:       versions in order; submitting before submit; two concurrent signs → one submit: yes/no
+    RETRY:       refused / reverted / expired publish → publish offered again and confirms; v1 past expiresAt → nothing sent: yes/no
     READS:       chain page, offer page, market detail write nothing and make 0 RPC calls: yes/no
     CHAIN DOWN:  degraded/disabled/misconfigured → off-chain unaffected, all prior tests pass: yes/no
     ANVIL:       publish v1 / version 2 / pause / resume confirmed and getOffer matches; replay → DigestUsed; expiry → Expired: yes/no
@@ -206,4 +209,4 @@ Open a **draft** PR (the repo merges with merge commits). Put this block, filled
 
 Disclosing a gap counts as diligence, not failure.
 
-/goal T15 is done when a seller can publish a draft on chain and record every later version, pause, resume and expiry per D-28 and C-17: schema 6 migrates a populated v5 file losslessly; the commitment matches the documented formula, ignores baseMinor and markup, and changes with any buyer-visible field; the server rebuilds every signed message and only the seller company's confirmed wallets can sign; actions go on chain in order, with the submitting row written before submit and concurrent signs sending once; chain pages, the offer page and the market detail never write or call the chain; off-chain offers work unchanged with the chain down; npm run test:chain confirms publish, version, pause, resume, a DigestUsed replay and expiry on anvil; task/T15-offers-on-chain, rebased on current main, passes node --check, npm test (0 skipped), npm run test:chain and forge test; and the draft PR shows Semgrep, Trivy and Bugbot passing, with the filled-in handoff. Keep the PR merge-ready by fixing CI and bot findings within this scope only.
+/goal T15 is done when a seller can publish a draft on chain and record every later version, pause, resume and expiry per D-28 and C-17: schema 6 migrates a populated v5 file losslessly; the commitment matches the documented formula, ignores baseMinor and markup, and changes with any buyer-visible field; the server rebuilds every signed message and only the seller company's confirmed wallets can sign; actions go on chain in order, with the submitting row written before submit and concurrent signs sending once; a failed publish can be retried to confirmed; chain pages, the offer page and the market detail never write or call the chain; off-chain offers work unchanged with the chain down; npm run test:chain confirms publish, version, pause, resume, a DigestUsed replay and expiry on anvil; task/T15-offers-on-chain, rebased on current main, passes node --check, npm test (0 skipped), npm run test:chain and forge test; and the draft PR shows Semgrep, Trivy and Bugbot passing, with the filled-in handoff. Keep the PR merge-ready by fixing CI and bot findings within this scope only.
