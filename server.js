@@ -16,8 +16,9 @@ const marketRoutes = require("./lib/routes/market");
 const requestRoutes = require("./lib/routes/requests");
 const operatorRoutes = require("./lib/routes/operator");
 const walletRoutes = require("./lib/routes/wallet");
+const chainOfferRoutes = require("./lib/routes/chain-offers");
 
-const areas = [systemRoutes, connectRoutes, offerRoutes, marketRoutes, requestRoutes, operatorRoutes, walletRoutes];
+const areas = [systemRoutes, connectRoutes, offerRoutes, marketRoutes, requestRoutes, operatorRoutes, walletRoutes, chainOfferRoutes];
 
 const accessTokens = new Map();
 const refreshInflight = new Map();
@@ -191,6 +192,7 @@ function createServer({
   fetchImpl = globalThis.fetch,
   deployment: deploymentOverride = null,
   chain: chainOverride = null,
+  now = null,
 } = {}) {
   const activeRecords = records || openRecords(null);
   let endpointsPromise;
@@ -279,6 +281,7 @@ function createServer({
     rememberAccessToken,
     forgetAccessToken,
     revokeRefreshToken,
+    now,
   };
 
   const router = createRouter();
