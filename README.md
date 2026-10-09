@@ -201,3 +201,15 @@ States:
 - **Expired.** The signature deadline passed before the action was confirmed. It can be signed again.
 
 When the chain is not ready, the page says recording is unavailable, and publishing, editing, and pausing still work off chain.
+
+## Recording a request on chain
+
+This applies only to a request on an offer that was published on chain. A request on any other offer stays off chain, and accepting it works as before.
+
+The buyer opens the request's chain page and links the request. That signature records the request against the offer's pinned version. The buyer then signs the listed terms. The seller accepts and signs the same terms, and that is the moment the request is accepted off chain and the acceptance is sent. For a counter, the seller signs the counter first and the buyer accepts and signs.
+
+After that, carrier statuses are signed in the order they were recorded off chain. Either company can sign one. Cancellation is signed by both companies, and once the request is cancelled off chain that comes before any status that was never signed.
+
+Decline, withdraw, a counter itself, and a dispute stay off chain. The chain stores the request key, the terms commitment, the status, and the cancellation. It does not store the price, the quantity, or either company's name.
+
+Opening the chain page does not ask the chain. Accepting from the request page is refused for an on-chain offer; both signatures happen on the chain page.
