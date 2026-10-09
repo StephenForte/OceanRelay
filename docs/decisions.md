@@ -592,6 +592,51 @@ Neither the planner nor any worker handles a private key.
   - an operator view of the bindings: T16.
 - **Chain not ready:** `/wallet` says binding is unavailable and includes no script, and the POSTs refuse without writing. Nothing else in the marketplace changes.
 
+### D-28 — Offers on chain: opt-in per offer, signed on wallet pages (2026-10-08, operator decisions)
+
+**Operator decisions, 2026-10-08** (asked by the planner before T15):
+- **Opt-in per offer.** A seller chooses "Publish on chain". From then on, that offer's later versions and state changes are recorded only with the seller's signature, and in T17 so are its requests' acceptances, statuses and cancellations. An offer published the normal way stays off-chain. This matches the PRD: "publishing an on-chain offer … requires the bound wallet".
+- **Signing on dedicated wallet pages** under `/chain/…`. They carry D-27's script and CSP. Every other page stays script-free, so D-25 and D-23 are unchanged.
+- **Split:** T15 covers offers; T17 covers requests (request, two-signature acceptance, carrier status, two-signature cancellation); T16 reconciliation follows T17.
+
+**Facts it rests on** (planner, from `contracts/src/OceanRelayLedger.sol` on `main`):
+- `publishOffer` needs a new non-zero `offerId`, a non-zero commitment, and `expiresAt` later than the block time; it creates version 1, `Published`.
+- `publishVersion` needs `version` = current + 1, and the state `Published` or `Paused`.
+- `setOfferState` needs `seq` = the offer's state-change count. It allows Published↔Paused, and Published or Paused → Withdrawn.
+- `markExpired` is relayer-only, with no user signature: past `expiresAt`, from Published or Paused.
+- `getOffer(offerId)` returns `(companyKey, version, stateSeq, state, expiresAt, commitment)`.
+- Off-chain, an offer is `draft`, `published` or `paused`, and `expired` is derived (D-14). A published version is immutable, and every buyer-visible change appends a version (D-15). Off-chain has no withdraw.
+
+**Rules:**
+- **Entry point.** "Publish on chain" is offered only for a **draft**: off-chain publish and chain `publishOffer` happen together. Planner default: an offer already published off-chain is not put on chain later. This keeps the rule that chain version *n* is off-chain version *n*.
+- **A failed publish can be retried.** *Added 2026-10-08, from Bugbot on the D-28 PR:* the draft-only rule governs only entry, when `offerKey` is created.
+  - While an offer has a chain record and no `publish` action is `confirmed`, and none is `submitting` or `pending`, the next required action is `publish` again, with a fresh signature, even though the offer is no longer a draft. This covers a previous publish that ended `refused`, `reverted` or `expired`. A failed `publishOffer` leaves no state on chain, so the same `offerKey` is still new.
+  - A retry records on chain only; the offer is already published off-chain.
+  - It commits version 1, and later versions and the state follow in order.
+  - If version 1's `expiresAt` has passed, the offer cannot be recorded, and the chain page says so.
+- **Who and when.**
+  - It needs: the chain `ready`; the seller company holding a `confirmed` wallet (C-16); and a signature recovered from one of the company's `confirmed` wallets.
+  - A signature from any other address is refused before anything is written or sent.
+- **Ids and commitments** (D-24: opaque, with salts that never leave OceanRelay):
+  - the chain `offerKey` is 32 random bytes, created once by a POST, never derived from the offer id;
+  - each version *n* has its own 32-byte random salt, created by a POST before signing;
+  - `commitment(n) = keccak256(salt_n ‖ sha256(canonical_n))`. Here `canonical_n` is C-10's `buyerTermsCanonical` over version *n*'s buyer-visible fields: `counter` 0, `quantity` the listed quantity, `unitBuyerMinor` the buyer price, and `totalMinor` = quantity × unitBuyerMinor. So the commitment covers only what a buyer sees (D-13).
+  - `expiresAt` is the end of the version's `validityDeadline` day in UTC (23:59:59), as unix seconds. That matches D-14, where an offer is valid through its deadline day.
+- **What follows publish.** Once an offer is on chain, the chain lags the off-chain record until the seller signs:
+  - each off-chain version after the last confirmed chain version needs `publishVersion`, **in order**;
+  - an off-chain state that differs from the chain state (published ↔ paused) needs `setOfferState`.
+  - The seller's chain page derives the next required action by comparing the two records, which needs no write. Versions come first, then state.
+  - The existing offer routes do not change. Pausing and editing still work at once off-chain.
+- **Expiry.** When the off-chain offer reads `expired` and the chain offer is still Published or Paused past `expiresAt`, the seller's check calls `markExpired`. No signature is needed.
+- **One chain action per offer in flight.** Each action follows D-27's order: write `submitting`, then submit, then apply the result. Results map as in D-27: `confirmed`, `pending` with the hash, `reverted`, and `refused` with the error name. An explicit check POST resolves `submitting` and `pending`, by receipt or by `getOffer`; after the signature deadline, an unconfirmed action is `expired`.
+- **Signature deadline:** each signature carries a deadline in (now, now + 15 min]; the page proposes now + 10 min.
+- **Reads:** chain pages, the offer page and the marketplace never write and make no RPC call. Chain state shown to users comes from the records.
+- **Buyers.**
+  - The marketplace detail of an on-chain offer shows the confirmed chain version, its transaction link, and this copy: "The chain shows this version was recorded on ForteL2 Sepolia. It does not show that the carrier has the space." (PRD: it does not say the capacity claim is true.)
+  - Nothing on chain or on screen reveals price, markup, company or customer.
+- **Chain not ready:** the chain pages say recording is unavailable, and nothing is signed or sent. Everything off-chain works as before (D-26).
+- **Not in T15:** requests and everything after them (T17); withdrawing on chain (there is no off-chain withdraw); operator wallets (none are registered yet; the owner's `setOperator`); reconciliation (T16).
+
 ## Interface contracts
 
 A contract is the surface other tasks build on. The task named as owner publishes it; later
@@ -1019,3 +1064,40 @@ All POSTs need the session's CSRF token. A request that is not signed in gets wh
 - actor role `user`;
 - `subject.wallet` is the EIP-55 address. It is a new subject key, validated as `0x` plus 40 hex characters;
 - no `detail`.
+
+### C-17 — On-chain offer record, schema v6 (owner: T15; implements D-28; extends C-7 and C-12; consumed by T16 and T17)
+
+**Records file, schema 6.** An offer may carry `chain`. An offer without it is off-chain only.
+
+```
+offers[id].chain = {
+  offerKey: "0x" + 64 hex,              // D-28; random, never changes
+  enabledAt: ISO, enabledBy: sub,
+  salts: { "<n>": "0x" + 64 hex },      // one per version, created before signing
+  confirmed: { version: n, state: "published" | "paused" | "expired", stateSeq: k },  // what the chain is known to hold
+  actions: [ {
+    id, kind: "publish" | "version" | "state" | "expire",
+    version: n | null, to: "published" | "paused" | "expired" | null, seq: k | null,
+    signer: EIP-55 address | null,      // null for expire (relayer only)
+    deadline: unix seconds | null,
+    status: "submitting" | "pending" | "confirmed" | "reverted" | "refused" | "expired",
+    txHash: "0x" + 64 hex | null, error: C-14 error name | null,
+    createdAt: ISO, updatedAt: ISO
+  } ]
+}
+```
+
+- **Migration 5 → 6:** no offer changes; it only sets `schemaVersion` 6 and writes the backup first (the `M5_BAK_SUFFIX` pattern gives `M6_BAK_SUFFIX`). Schema 1–6 is read; anything above 6 is refused.
+- `confirmed` changes only when an action becomes `confirmed`. Nothing else edits it.
+- Salts and signatures never appear on any page except the seller's own signing form. Signatures are not stored.
+- **For T16 and T17:** `records.chainOfferFor(offerId)` returns a copy of `chain` or `null`, and `records.commitmentFor(offerId, n)` returns the commitment of version *n*. T17 extends this record shape; it does not change it.
+
+**Routes** (all signed in; for another company's offer, or one that does not exist, each returns the same byte-identical 404 as the offer routes, D-12):
+- `GET /chain/offers/:id`: the offer's chain page. It shows the confirmed chain state, the actions, and the next required step with its sign form. It is a wallet page: the D-27 script and CSP, with the script only when a signature is possible.
+- `POST /chain/offers/:id/prepare`: creates `offerKey` (and so marks the offer on chain) and the salt for the next version, as needed. Then 303.
+- `POST /chain/offers/:id/sign`: fields `csrf_token`, `kind`, `deadline`, `signature`. The server rebuilds the message from the records and recovers the signer. For `publish` on a draft, the same flow also publishes off-chain. A publish retry (D-28) records on chain only. Then 303.
+- `POST /chain/offers/:id/check`: resolves in-flight actions and calls `markExpired` when due. Then 303.
+
+The offer page and the marketplace detail page link to the chain page and show its state. These are additive changes to their views.
+
+**Extension to C-12:** a new event, `offer.chain_recorded`. It is written when an action becomes `confirmed`. Actor: the seller's `sub` and company, role `seller` (`expire` has the actor of whoever ran the check). Subject: `offerId` and `version`. `detail.to` is the action kind or the new state.
