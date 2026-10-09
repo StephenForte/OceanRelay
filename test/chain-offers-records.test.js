@@ -326,4 +326,57 @@ describe("offer commitment", () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("does not revive an expired action after another action has started", () => {
+    const dir = tempDir();
+    try {
+      const records = openRecords(path.join(dir, "records.json"));
+      const offer = createDraft(records);
+      records.prepareChainOffer(SELLER.companyId, offer.id, SELLER.sub);
+      const now = Math.floor(Date.parse("2026-10-08T12:00:00Z") / 1000);
+      const first = records.beginChainAction(SELLER.companyId, offer.id, {
+        kind: "publish",
+        version: 1,
+        to: "published",
+        seq: null,
+        signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+        deadline: now + 60,
+        actorSub: SELLER.sub,
+      }, TODAY, now);
+      assert.equal(first.ok, true);
+      records.applyChainChecks(SELLER.companyId, offer.id, [{ id: first.action.id, state: "expired", error: null }]);
+      const second = records.beginChainAction(SELLER.companyId, offer.id, {
+        kind: "publish",
+        version: 1,
+        to: "published",
+        seq: null,
+        signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+        deadline: now + 120,
+        actorSub: SELLER.sub,
+      }, TODAY, now);
+      assert.equal(second.ok, true);
+      const late = records.finishChainAction(SELLER.companyId, offer.id, first.action.id, {
+        state: "pending",
+        txHash: `0x${"cd".repeat(32)}`,
+        error: null,
+        actorSub: SELLER.sub,
+      });
+      assert.deepEqual(late, { ok: false, error: "superseded" });
+      const actions = records.chainOfferFor(offer.id).actions;
+      assert.equal(actions[0].status, "expired");
+      assert.equal(actions[0].txHash, null);
+      assert.equal(actions[1].status, "submitting");
+      const confirmed = records.finishChainAction(SELLER.companyId, offer.id, first.action.id, {
+        state: "confirmed",
+        txHash: `0x${"cd".repeat(32)}`,
+        error: null,
+        actorSub: SELLER.sub,
+      });
+      assert.equal(confirmed.ok, false);
+      assert.equal(records.chainOfferFor(offer.id).actions[0].status, "expired");
+      assert.equal(records.chainOfferFor(offer.id).confirmed, null);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
