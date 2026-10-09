@@ -620,7 +620,7 @@ Neither the planner nor any worker handles a private key.
 - **Ids and commitments** (D-24: opaque, with salts that never leave OceanRelay):
   - the chain `offerKey` is 32 random bytes, created once by a POST, never derived from the offer id;
   - each version *n* has its own 32-byte random salt, created by a POST before signing;
-  - `commitment(n) = keccak256(salt_n ‖ sha256(canonical_n))`. Here `canonical_n` is C-10's `buyerTermsCanonical` over version *n*'s buyer-visible fields: `counter` 0, `quantity` the listed quantity, `unitBuyerMinor` the buyer price, and `totalMinor` = quantity × unitBuyerMinor. So the commitment covers only what a buyer sees (D-13).
+  - `commitment(n) = keccak256(salt_n ‖ sha256(canonical_n))`. Here `canonical_n` is C-10's `buyerTermsCanonical` over version *n*'s buyer-visible fields: `counter` `null` (*corrected 2026-10-09:* C-10 accepts only a positive integer or `null`, and `null` is the listed terms; "counter 0" was the planner's error), `quantity` the listed quantity, `unitBuyerMinor` the buyer price, and `totalMinor` = quantity × unitBuyerMinor. So the commitment covers only what a buyer sees (D-13).
   - `expiresAt` is the end of the version's `validityDeadline` day in UTC (23:59:59), as unix seconds. That matches D-14, where an offer is valid through its deadline day.
 - **What follows publish.** Once an offer is on chain, the chain lags the off-chain record until the seller signs:
   - each off-chain version after the last confirmed chain version needs `publishVersion`, **in order**;

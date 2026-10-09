@@ -136,7 +136,7 @@ Tasks, in order. Each runs after the previous one merges.
 | T13 | Chain client (C-15, D-26): read and write RPCs, relayer EIP-1559 signing and registrar EIP-712 signing (`@noble/*`, exact pins, lockfile), sequencer receipts, the refused/pending/confirmed/reverted model, startup checks against `deployments/fortel2-sepolia.json`, `/config` chain status, Node pinned to 26.x, F-17 README fixes. It must match T12's vectors byte for byte. | `lib/chain/**`, `contracts/abi/` | strongest | **merged 2026-10-08**: PR #51 at `d310ee2` (merge `efba765`), after three rounds (§6). Prompt: `docs/prompts/T13-chain-client.md`. |
 | O-11 | **The operator added** the 4 chain secrets to Render. `/config` shows `chain.state: "ready"`, and the Access values were tested from the Render Shell (HTTP 200). | operator | — | **done 2026-10-08**; planner verified (§7) |
 | T14 | Wallet binding (D-27, C-16): `/wallet` with the wallet-page script and its CSP (D-25), the EIP-712 `Binding` signed in the browser and co-signed by the registrar, records schema 5 (`companies`), and the `wallet.bound` audit event | `lib/routes/wallet.js`, `lib/views/wallet.js`, the script | **strongest** (raised from strong: a migration, the authorization boundary T15 relies on, and the first page script) | **approved 2026-10-08**: PR #53 at `e41aff8`, after two rounds (§6). Prompt: `docs/prompts/T14-wallet-binding.md`. |
-| T15 | Offers on chain (D-28, C-17): `/chain/offers/:id` signing pages, salted offer keys and version commitments (C-10 canonical form, buyer-visible only), publish from a draft, `publishVersion` in order, pause and resume, `markExpired`, records schema 6, and the chain line on the offer and marketplace pages | `lib/routes/chain-offers.js`, `lib/views/chain-offers.js`, the commitment module | strongest | **ready 2026-10-08**: `docs/prompts/T15-offers-on-chain.md`. Dispatch after this docs PR merges. |
+| T15 | Offers on chain (D-28, C-17): `/chain/offers/:id` signing pages, salted offer keys and version commitments (C-10 canonical form, buyer-visible only), publish from a draft, `publishVersion` in order, pause and resume, `markExpired`, records schema 6, and the chain line on the offer and marketplace pages | `lib/routes/chain-offers.js`, `lib/views/chain-offers.js`, the commitment module | strongest | **in review**: PR #57 round 1 `38dcc48`, changes requested 2026-10-09 (an expire action can stay in flight forever; §6). Prompt: `docs/prompts/T15-offers-on-chain.md`. |
 | T17 | Requests on chain (split from T15 by operator decision, D-28): `recordRequest`, the two-signature acceptance (the proposer signs at request or counter, the accepter at accept), carrier status, and the two-signature cancellation, on `/chain/…` signing pages | — | strongest | after T15 |
 | T16 | Operator reconciliation: compare the records with chain events and flag mismatches; a repair is an audited correction | — | strong | after T17 |
 | A-5 | Phase 5 acceptance on the deployed service | operator | — | after T16 |
@@ -809,6 +809,28 @@ The operator merged #32 by accident before the planner review. The review then r
   - **A rejected switch (4001), and a rejected add:** "The wallet did not switch to this chain.", with no sign and no submit.
   - The add parameters come from the page's `data-chain`, as D-27 as amended requires.
 - **Not verified:** a real browser wallet. A-5 covers it on the deployed service, so the first real bind should be watched. MetaMask may show a warning that chain 852 is unknown; that is expected.
+
+### T15 — PR #57, first round `38dcc48`: changes requested 2026-10-09
+
+- **Base and scope:** merge-base `c9c43d5` = `main`. 20 files, all owned or shared-additive; `layout.js` is untouched.
+- **Gate** (planner, scratch clone): `npm test` 276/0/0; `test:chain` 4/4, including "records an offer through the HTTP routes"; `forge test` 84; no anvil left running. Semgrep and Trivy pass. Bugbot started only after a manual `bugbot run` comment; on `264a810` it never queued.
+- **The C-17 difference is the planner's error:** C-10 (`lib/terms-hash.js:69`) accepts `counter` only as a positive integer or `null`. D-28's "counter 0" is corrected to `null` the same day.
+- **The "skipped version" in the handoff is safe:** `nextChainStep` stops offering a version whose `expiresAt` has passed. It never jumps a number, so chain version *n* is still off-chain version *n*.
+- **Checked, and a false alarm:** the commitment reads `terms.buyerMinor`. The real create and edit paths store it (`withBuyerPrice` in `lib/routes/offers.js`, and `editOffer` recomputes it), so real offers have it.
+- **Probes** (the planner's own harness):
+  - **Commitment, recomputed independently:** C-10's canonical form, then `openssl dgst -sha256`, then `cast keccak(salt ‖ digest)`, equals `commitmentFor`. The canonical holds `unitBuyerMinor` 2500, `totalMinor` 25000 and `counter` null, with no `baseMinor`, `markup` or snapshot.
+  - **Signers:** another company's confirmed wallet, with a valid signature over the correct message, gives `not_signer`; nothing is written and there are 0 chain calls. A `Version` signature while `publish` is next gives `not_next`, with nothing written or sent.
+  - **Server-built:** a valid seller signature posted with junk `commitment`, `offerKey` and `version` fields gives `recorded`. One `publishOffer` is sent, built from the records, and the offer is published off-chain.
+  - **Reads:** the chain page, the offer page and the market detail, before and after publish: the file is byte-identical with the same mtime, and there are 0 chain calls.
+  - **The market detail** has D-28's copy, verbatim, and is script-free with no CSP. The salt appears on neither the market nor the offer page.
+  - **404:** another company's `/chain/offers/:id` is byte-identical to the `/offers` 404.
+- **Blocking: an expire action can stay in flight forever** (Bugbot, High, confirmed).
+  - `resolveAction` excludes `kind: "expire"` from both receipt handling and deadline expiry (an expire row has no deadline). It confirms only when `getOffer` already shows Expired.
+  - Probe: a published offer goes past its deadline; the check starts `markExpired`, which comes back `pending` (undelivered, as T13 reports it), or whose receipt is `reverted`. After 4 more checks over 4 days, the row is still `expire:pending`, with 1 `markExpired` sent.
+  - `actionInFlight` keeps the offer on "Check" for good, and expiry is never retried.
+  - **Fix shown to work** in the scratch clone: resolve an expire row by receipt (`confirmed` or `reverted`), then by `getOffer`; once it is older than the receipt buffer, mark it `expired`, so the next check sends a fresh `markExpired`. Rows then resolve (`expired`, `reverted`) and retries go out (3 sends); `npm test` 276 stays green.
+- **Not blocking** (Bugbot, Medium, `DuplicateOffer` on retry): it needs a publish that landed before its deadline but that `getOffer` did not show more than 2 minutes after that deadline. The reads come from the sequencer, at about 1 block every 2 s. Recorded for T16: a chain offer that exists while the records say no publish confirmed is a reconciliation case.
+- **Not verified:** a real browser wallet signing Publish, Version and OfferState. A-5 covers it.
 
 ---
 
