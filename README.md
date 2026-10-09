@@ -182,3 +182,22 @@ States:
 - **Expired.** The deadline passed before the binding was confirmed.
 
 When the chain is not ready, the page says binding is unavailable and offers no action.
+
+## Recording an offer on chain
+
+Recording is optional, and only for a draft. The seller opens the offer and chooses Publish on chain. That page prepares a random offer key and a random salt, then asks the seller's bound wallet to sign. The relayer sends the transaction. The salt never leaves OceanRelay. The chain stores a commitment, not the price, the markup, the company, or the customer.
+
+After the first record, later versions are signed in order, then a pause or a resume. Expiry is recorded from the chain page with Check, and it does not need a signature. Opening the page does not ask the chain.
+
+What is recorded: the offer key, the version, a commitment to the buyer-visible terms, the expiry, and published, paused, or expired. What is not recorded: the base price, the markup, the rate snapshot, and any name or id.
+
+States:
+
+- **Submitting.** The action is recorded here and is being sent.
+- **Pending.** The transaction was sent and is not confirmed yet. Pending is not a failure.
+- **Confirmed.** The chain has this action.
+- **Reverted.** The transaction was mined and did not succeed.
+- **Refused.** The chain refused the action. A refused publish can be signed again.
+- **Expired.** The signature deadline passed before the action was confirmed. It can be signed again.
+
+When the chain is not ready, the page says recording is unavailable, and publishing, editing, and pausing still work off chain.

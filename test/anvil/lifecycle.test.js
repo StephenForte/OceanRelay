@@ -27,6 +27,7 @@ const KEYS = {
   seller: "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6",
   buyer: "0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a",
   stranger: "0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba",
+  offer: "0x92db14e403b83dfe3df233f83dfa3a0d7096f21ca9b0d6d6b8d88b2b4ec1564e",
 };
 
 const DEADLINE = 1893456000;
@@ -308,6 +309,16 @@ describe("anvil ledger", () => {
         scratch,
       });
     });
+
+    await t.test("records an offer through the HTTP routes", async () => {
+      await recordOfferOverHttp({
+        url,
+        address,
+        genesisHash: genesis.hash,
+        runtimeCodeHash: keccakHex(hexToBytes(code)),
+        scratch,
+      });
+    });
   });
 });
 
@@ -503,6 +514,295 @@ async function bindWalletOverHttp({ url, address, genesisHash, runtimeCodeHash, 
     });
     assert.equal(checked.headers.get("location"), "/wallet?result=bound");
     assert.equal(records.walletsFor("anvil-kings").at(-1).state, "confirmed");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
+function offerTerms(extra = {}) {
+  return {
+    source: "manual",
+    origin: "CNSHA",
+    destination: "USLAX",
+    equipment: "40HC",
+    quantity: 10,
+    unit: "container",
+    sailingStart: "2026-12-20",
+    sailingEnd: "2026-12-27",
+    cutoffDate: "2026-12-18",
+    validityDeadline: "2099-12-31",
+    currency: "USD",
+    baseMinor: 2000,
+    markup: { type: "absolute", minor: 500 },
+    buyerMinor: 2500,
+    codeShareName: "XYZ",
+    operatingCarrier: "ABC",
+    serviceTerms: "CY/CY",
+    ...extra,
+  };
+}
+
+function inputValue(html, name) {
+  const match = new RegExp(`name="${name}" value="([^"]*)"`).exec(html);
+  return match ? match[1] : "";
+}
+
+function chainNumber(value) {
+  return typeof value === "bigint" ? Number(value) : Number(value);
+}
+
+async function browserChainSignature(html, privateKey) {
+  const signer = openKey(privateKey);
+  const form = {
+    attributes: {
+      "data-domain": htmlAttr(html, "data-domain"),
+      "data-chain": htmlAttr(html, "data-chain"),
+      "data-typed": htmlAttr(html, "data-typed"),
+    },
+    children: [{ name: "signature", value: "" }],
+    getAttribute(name) {
+      return this.attributes[name];
+    },
+    querySelector(selector) {
+      const found = /name=([A-Za-z]+)/.exec(selector);
+      return this.children.find((child) => child.name === found[1]);
+    },
+    submit() {},
+  };
+  const button = {
+    listeners: {},
+    addEventListener(type, fn) {
+      this.listeners[type] = fn;
+    },
+  };
+  const document = {
+    getElementById(id) {
+      if (id === "chain-sign") return form;
+      if (id === "chain-sign-button") return button;
+      if (id === "chain-note") return { textContent: "" };
+      return null;
+    },
+  };
+  const ethereum = {
+    request({ method, params }) {
+      if (method === "eth_requestAccounts") return Promise.resolve([signer.address]);
+      if (method === "wallet_switchEthereumChain" || method === "wallet_addEthereumChain") {
+        return Promise.resolve(null);
+      }
+      return Promise.resolve(signer.signDigest(digestHex(JSON.parse(params[1]))));
+    },
+  };
+  const script = fs.readFileSync(path.join(__dirname, "../../lib/assets/wallet.js"), "utf8");
+  vm.runInNewContext(script, { window: { ethereum }, document }, { filename: "wallet.js" });
+  await button.listeners.click({ preventDefault() {} });
+  return {
+    kind: inputValue(html, "kind"),
+    deadline: inputValue(html, "deadline"),
+    signature: form.children[0].value,
+    message: JSON.parse(form.attributes["data-typed"]).message,
+  };
+}
+
+async function recordOfferOverHttp({ url, address, genesisHash, runtimeCodeHash, scratch }) {
+  const recordsPath = path.join(scratch, "offer-records.json");
+  const config = loadConfig({
+    RATE_NINJA_CLIENT_ID: "capacity-exchange",
+    RATE_NINJA_CLIENT_SECRET: "anvil-client-secret",
+    SESSION_SECRET: HTTP_SESSION,
+    TOKEN_ENCRYPTION_KEY: "anvil-token-encryption-key",
+    RATE_NINJA_BASE_URL: "http://127.0.0.1:9",
+    OCEANRELAY_REDIRECT_URI: "http://127.0.0.1:9/oauth/callback",
+    OCEANRELAY_RECORDS_PATH: recordsPath,
+    OCEANRELAY_STORE_PATH: path.join(scratch, "offer-store.json"),
+    OCEANRELAY_RELAYER_KEY: KEYS.relayer,
+    OCEANRELAY_REGISTRAR_KEY: KEYS.registrar,
+    CF_ACCESS_CLIENT_ID: "anvil-access-id",
+    CF_ACCESS_CLIENT_SECRET: "anvil-access-secret",
+    FORTEL2_READ_RPC: url,
+    FORTEL2_WRITE_RPC: url,
+    OCEANRELAY_CHAIN_MAX_FEE_GWEI: "100",
+  });
+  const store = openStore(config.storePath, config.tokenEncryptionKey);
+  const records = openRecords(recordsPath);
+  const clock = { now: Date.now() };
+  function seed(sid, csrf, profile) {
+    store.saveConnection(sid, {
+      refreshToken: `refresh-${sid}`,
+      scopes: ["profile:read", "rates:read", "sailings:read"],
+      profile: {
+        companyType: "Contract Owner",
+        active: true,
+        name: profile.companyName,
+        ...profile,
+      },
+    });
+    const value = encodeURIComponent(signSession({ sid, csrf, iat: Date.now() }, HTTP_SESSION));
+    return `${COOKIE_NAME}=${value}`;
+  }
+  const cookie = seed("sid-offer", "csrf-offer", {
+    sub: "user-offer",
+    companyId: "anvil-offer",
+    companyName: "Anvil Offer",
+  });
+  const server = createServer({
+    config,
+    store,
+    records,
+    now: () => clock.now,
+    deployment: {
+      chainId: 31337,
+      genesisHash,
+      address,
+      runtimeCodeHash,
+    },
+  });
+  const reader = createChain({
+    config: config,
+    deployment: { chainId: 31337, genesisHash, address, runtimeCodeHash },
+    pollIntervalMs: 50,
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const readyDeadline = Date.now() + 15_000;
+    let chainState = "";
+    while (Date.now() < readyDeadline) {
+      const configBody = await (await fetch(`${base}/config`)).json();
+      chainState = configBody.chain && configBody.chain.state;
+      if (chainState === "ready") break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.equal(chainState, "ready");
+    await reader.start();
+
+    const preparedWallet = await fetch(`${base}/wallet/prepare`, {
+      method: "POST",
+      redirect: "manual",
+      headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ csrf_token: "csrf-offer" }),
+    });
+    assert.equal(preparedWallet.status, 303);
+    const walletPage = await (await fetch(`${base}/wallet`, { headers: { cookie } })).text();
+    const bound = await browserSignature(walletPage, KEYS.offer);
+    const bind = await fetch(`${base}/wallet/bind`, {
+      method: "POST",
+      redirect: "manual",
+      headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        csrf_token: "csrf-offer",
+        wallet: bound.wallet,
+        deadline: bound.deadline,
+        signature: bound.signature,
+      }),
+    });
+    assert.equal(bind.headers.get("location"), "/wallet?result=bound");
+    assert.equal(records.walletsFor("anvil-offer")[0].state, "confirmed");
+
+    const today = new Date().toISOString().slice(0, 10);
+    const offer = records.createOffer(
+      { companyId: "anvil-offer", sub: "user-offer" },
+      { source: "manual", terms: offerTerms() }
+    );
+
+    async function signOffer() {
+      const prepared = await fetch(`${base}/chain/offers/${offer.id}/prepare`, {
+        method: "POST",
+        redirect: "manual",
+        headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ csrf_token: "csrf-offer" }),
+      });
+      assert.equal(prepared.status, 303, "prepare");
+      const page = await (await fetch(`${base}/chain/offers/${offer.id}`, { headers: { cookie } })).text();
+      const signed = await browserChainSignature(page, KEYS.offer);
+      const response = await fetch(`${base}/chain/offers/${offer.id}/sign`, {
+        method: "POST",
+        redirect: "manual",
+        headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          csrf_token: "csrf-offer",
+          kind: signed.kind,
+          deadline: signed.deadline,
+          signature: signed.signature,
+        }),
+      });
+      return { location: response.headers.get("location"), signed };
+    }
+
+    async function onChain() {
+      return reader.call("getOffer", [records.chainOfferFor(offer.id).offerKey]);
+    }
+
+    const published = await signOffer();
+    assert.equal(published.location, `/chain/offers/${offer.id}?result=recorded`, published.location);
+    assert.equal(records.getCompanyOffer("anvil-offer", offer.id).state, "published");
+    let stored = await onChain();
+    assert.equal(chainNumber(stored[1]), 1);
+    assert.equal(chainNumber(stored[3]), 1);
+    assert.equal(String(stored[5]).toLowerCase(), records.commitmentFor(offer.id, 1).toLowerCase());
+
+    const edited = records.editOffer("anvil-offer", offer.id, {
+      terms: offerTerms({ quantity: 8 }),
+    }, "user-offer", today);
+    assert.equal(edited.ok, true);
+    const versioned = await signOffer();
+    assert.equal(versioned.location, `/chain/offers/${offer.id}?result=recorded`);
+    stored = await onChain();
+    assert.equal(chainNumber(stored[1]), 2);
+    assert.equal(String(stored[5]).toLowerCase(), records.commitmentFor(offer.id, 2).toLowerCase());
+
+    const paused = await fetch(`${base}/offers/${offer.id}/state`, {
+      method: "POST",
+      redirect: "manual",
+      headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ csrf_token: "csrf-offer", to: "paused" }),
+    });
+    assert.equal(paused.status, 302);
+    assert.equal(records.getCompanyOffer("anvil-offer", offer.id).state, "paused");
+    const pauseSigned = await signOffer();
+    assert.equal(pauseSigned.location, `/chain/offers/${offer.id}?result=recorded`);
+    stored = await onChain();
+    assert.equal(chainNumber(stored[2]), 1);
+    assert.equal(chainNumber(stored[3]), 2);
+
+    const resumed = await fetch(`${base}/offers/${offer.id}/state`, {
+      method: "POST",
+      redirect: "manual",
+      headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ csrf_token: "csrf-offer", to: "published" }),
+    });
+    assert.equal(resumed.status, 302);
+    assert.equal(records.getCompanyOffer("anvil-offer", offer.id).state, "published");
+    const resumeSigned = await signOffer();
+    assert.equal(resumeSigned.location, `/chain/offers/${offer.id}?result=recorded`);
+    stored = await onChain();
+    assert.equal(chainNumber(stored[2]), 2);
+    assert.equal(chainNumber(stored[3]), 1);
+
+    const message = published.signed.message;
+    const replay = await reader.submit("publishOffer", [
+      message.offerId,
+      message.commitment,
+      message.expiresAt,
+      message.deadline,
+      published.signed.signature,
+    ]);
+    assert.equal(replay.state, "refused");
+    assert.equal(replay.error && replay.error.name, "DigestUsed");
+
+    const expiresAt = message.expiresAt;
+    clock.now = (expiresAt + 120) * 1000;
+    await rpc(url, "evm_setNextBlockTimestamp", [`0x${(BigInt(expiresAt) + 120n).toString(16)}`]);
+    await rpc(url, "evm_mine", []);
+    const checked = await fetch(`${base}/chain/offers/${offer.id}/check`, {
+      method: "POST",
+      redirect: "manual",
+      headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ csrf_token: "csrf-offer" }),
+    });
+    assert.equal(checked.headers.get("location"), `/chain/offers/${offer.id}?result=recorded`);
+    stored = await onChain();
+    assert.equal(chainNumber(stored[3]), 4);
+    assert.equal(records.chainOfferFor(offer.id).confirmed.state, "expired");
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
