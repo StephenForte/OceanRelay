@@ -113,7 +113,7 @@ describe("schema 4 to 5", () => {
       assert.equal(mode(bak), 0o600);
       assert.equal(fs.existsSync(`${file}.pre-m4.bak`), false);
       const migrated = JSON.parse(fs.readFileSync(file, "utf8"));
-      assert.equal(migrated.schemaVersion, 5);
+      assert.equal(migrated.schemaVersion, 6);
       assert.deepEqual(migrated.companies, {});
       assert.equal(JSON.stringify(migrated.offers), JSON.stringify(original.offers));
       assert.equal(JSON.stringify(migrated.requests), JSON.stringify(original.requests));
@@ -126,7 +126,7 @@ describe("schema 4 to 5", () => {
       const settled = fs.readFileSync(file);
       const settledBak = fs.readFileSync(bak);
       records.view((data) => {
-        assert.equal(data.schemaVersion, 5);
+        assert.equal(data.schemaVersion, 6);
         assert.equal(data.offers["offer-1"].versions[1].terms.quantity, 6);
         assert.equal(data.requests["req-1"].fulfilment.history[0].note, "café");
       });
