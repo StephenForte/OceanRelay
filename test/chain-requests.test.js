@@ -19,6 +19,7 @@ const { href: scriptHref } = require("../lib/wallet-script");
 const { renderNotFound } = require("../lib/views/requests");
 const { buyerView } = require("../lib/offer-domain");
 const { buyerTermsCanonical } = require("../lib/terms-hash");
+const { commitmentFromTermsHash } = require("../lib/commitment");
 
 const KEYS = {
   relayer: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d",
@@ -917,6 +918,52 @@ describe("acceptance retry and the accept gate", () => {
       const again = await signPage(ctx, ctx.seller, KEYS.seller, request.id);
       assert.match(again.response.location, /result=recorded/);
       assert.equal(ctx.records.chainRequestFor(request.id).confirmed.status, "accepted");
+    });
+  });
+
+  it("confirms a lost acceptance once the chain shows it, without a new signature", async () => {
+    await withApp(async (ctx) => {
+      async function loseAcceptance(request) {
+        await signPage(ctx, ctx.buyer, KEYS.buyer, request.id);
+        ctx.chain.fail = true;
+        const lost = await signPage(ctx, ctx.seller, KEYS.seller, request.id);
+        assert.match(lost.response.location, /result=pending/);
+        ctx.records.transact((data) => {
+          const row = data.requests[request.id].chain.actions.find((entry) => entry.kind === "acceptance");
+          row.createdAt = new Date(ctx.clock.now).toISOString();
+        });
+        ctx.clock.now += 3 * 60 * 1000;
+        const expired = await post(ctx.base, ctx.seller.cookie, `/chain/requests/${request.id}/check`, { csrf_token: ctx.seller.csrf });
+        assert.match(expired.location, /result=expired/);
+        ctx.chain.fail = false;
+        const stored = ctx.records.getRequestFor("kings", request.id);
+        const chain = ctx.records.chainRequestFor(request.id);
+        ctx.chain.requestOnChain = [ZERO, ZERO, 1, 0, 2, commitmentFromTermsHash(stored.acceptance.termsHash, chain.salts["0"])];
+      }
+
+      const { request, offer } = await linkRequest(ctx);
+      await loseAcceptance(request);
+      const submits = ctx.chain.calls.submit;
+      const checked = await post(ctx.base, ctx.seller.cookie, `/chain/requests/${request.id}/check`, { csrf_token: ctx.seller.csrf });
+      assert.match(checked.location, /result=recorded/);
+      assert.equal(ctx.chain.calls.submit, submits);
+      assert.equal(ctx.records.chainRequestFor(request.id).confirmed.status, "accepted");
+      assert.equal(ctx.records.chainRequestFor(request.id).actions.find((entry) => entry.kind === "acceptance").status, "confirmed");
+
+      const second = makeRequest(ctx, offer, 1);
+      await prepare(ctx, second.id, ctx.buyer);
+      await signPage(ctx, ctx.buyer, KEYS.buyer, second.id);
+      await loseAcceptance(second);
+      const beforeRetry = ctx.chain.calls.submit;
+      const retried = await post(ctx.base, ctx.seller.cookie, `/chain/requests/${second.id}/sign`, {
+        csrf_token: ctx.seller.csrf,
+        kind: "accept",
+        deadline: String(Math.floor(ctx.clock.now / 1000) + 600),
+        signature: "0x" + "77".repeat(65),
+      });
+      assert.match(retried.location, /result=recorded/);
+      assert.equal(ctx.chain.calls.submit, beforeRetry);
+      assert.equal(ctx.records.chainRequestFor(second.id).confirmed.status, "accepted");
     });
   });
 
