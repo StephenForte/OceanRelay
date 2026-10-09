@@ -181,7 +181,7 @@ describe("schema 5 to 6", () => {
       assert.equal(mode(bak), 0o600);
       assert.equal(fs.existsSync(`${file}.pre-m5.bak`), false);
       const migrated = JSON.parse(fs.readFileSync(file, "utf8"));
-      assert.equal(migrated.schemaVersion, 6);
+      assert.equal(migrated.schemaVersion, 7);
       assert.equal(JSON.stringify(migrated.offers), JSON.stringify(original.offers));
       assert.equal(JSON.stringify(migrated.requests), JSON.stringify(original.requests));
       assert.equal(JSON.stringify(migrated.audit), JSON.stringify(original.audit));
@@ -196,7 +196,7 @@ describe("schema 5 to 6", () => {
       const settled = fs.readFileSync(file);
       records.view(() => {});
       openRecords(file).view((data) => {
-        assert.equal(data.schemaVersion, 6);
+        assert.equal(data.schemaVersion, 7);
         assert.equal(data.companies.kings.companyKey, original.companies.kings.companyKey);
       });
       assert.deepEqual(fs.readFileSync(file), settled);

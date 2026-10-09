@@ -173,7 +173,7 @@ describe("M-4 migration", () => {
       assert.deepEqual(fs.readFileSync(bak), original);
       assert.equal(mode(bak), 0o600);
       const v4 = JSON.parse(fs.readFileSync(recordsPath, "utf8"));
-      assert.equal(v4.schemaVersion, 6);
+      assert.equal(v4.schemaVersion, 7);
       assert.deepEqual(v4.companies, {});
       const rest = (data) => {
         const copy = { ...data };
@@ -197,7 +197,7 @@ describe("M-4 migration", () => {
       const settled = fs.readFileSync(recordsPath);
       const settledBak = fs.readFileSync(bak);
       records.view((data) => {
-        assert.equal(data.schemaVersion, 6);
+        assert.equal(data.schemaVersion, 7);
       });
       openRecords(recordsPath).view((data) => {
         assert.equal(data.requests[acceptedBefore.id].fulfilment.status, "accepted");
@@ -237,7 +237,7 @@ describe("M-4 migration", () => {
       assert.equal(JSON.parse(fs.readFileSync(`${v1Path}.pre-m3.bak`, "utf8")).schemaVersion, 2);
       assert.equal(JSON.parse(fs.readFileSync(`${v1Path}.pre-m4.bak`, "utf8")).schemaVersion, 3);
       const v1Now = JSON.parse(fs.readFileSync(v1Path, "utf8"));
-      assert.equal(v1Now.schemaVersion, 6);
+      assert.equal(v1Now.schemaVersion, 7);
       assert.deepEqual(v1Now.companies, {});
       assert.equal(v1Now.future.keep, true);
       assert.deepEqual(v1Now.requests, {});
@@ -255,7 +255,7 @@ describe("M-4 migration", () => {
       assert.deepEqual(fs.readFileSync(`${v2Path}.pre-m3.bak`), v2);
       assert.equal(JSON.parse(fs.readFileSync(`${v2Path}.pre-m4.bak`, "utf8")).schemaVersion, 3);
       const v2Now = JSON.parse(fs.readFileSync(v2Path, "utf8"));
-      assert.equal(v2Now.schemaVersion, 6);
+      assert.equal(v2Now.schemaVersion, 7);
       assert.deepEqual(v2Now.companies, {});
       assert.equal(v2Now.offers.a.custom, "café");
       assert.equal(v2Now.future.keep, 2);
@@ -275,7 +275,7 @@ describe("M-4 migration", () => {
       openRecords(v3Path);
       assert.equal(fs.readFileSync(`${v3Path}.pre-m4.bak`, "utf8"), "sentinel-m4");
       const migrated = JSON.parse(fs.readFileSync(v3Path, "utf8"));
-      assert.equal(migrated.schemaVersion, 6);
+      assert.equal(migrated.schemaVersion, 7);
       assert.deepEqual(migrated.companies, {});
       assert.equal(migrated.future.keep, 3);
       assert.equal(JSON.stringify(migrated.offers), JSON.stringify(v3.offers));
@@ -285,12 +285,13 @@ describe("M-4 migration", () => {
       assert.deepEqual(migrated.requests.a.fulfilment, INITIAL);
 
       const v6Path = path.join(dir, "v6.json");
-      const v6 = JSON.stringify({ schemaVersion: 7, offers: { keep: { qty: 7 } }, requests: {}, audit: ["stay"], future: 1 });
+      const v6 = JSON.stringify({ schemaVersion: 8, offers: { keep: { qty: 7 } }, requests: {}, audit: ["stay"], future: 1 });
       fs.writeFileSync(v6Path, v6);
       assert.throws(() => openRecords(v6Path), /schemaVersion/);
       assert.equal(fs.readFileSync(v6Path, "utf8"), v6);
       assert.equal(fs.existsSync(`${v6Path}.pre-m5.bak`), false);
       assert.equal(fs.existsSync(`${v6Path}.pre-m6.bak`), false);
+      assert.equal(fs.existsSync(`${v6Path}.pre-m7.bak`), false);
       assert.equal(fs.existsSync(`${v6Path}.pre-m4.bak`), false);
       assert.equal(fs.existsSync(`${v6Path}.pre-m3.bak`), false);
       assert.equal(fs.existsSync(`${v6Path}.pre-m2.bak`), false);
