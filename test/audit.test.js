@@ -408,7 +408,7 @@ describe("audit events", () => {
       assert.deepEqual(audit[0], prior);
       assert.equal(audit[1].event, "offer.created");
       assert.equal(audit[2].event, "auth.connected");
-      assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).schemaVersion, 6);
+      assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).schemaVersion, 7);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
