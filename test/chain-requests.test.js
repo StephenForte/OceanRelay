@@ -967,6 +967,84 @@ describe("acceptance retry and the accept gate", () => {
     });
   });
 
+  it("stores the next signature after a retried action is already confirmed", async () => {
+    await withApp(async (ctx) => {
+      seedParties(ctx);
+      const offer = onChainOffer(ctx);
+      const request = makeRequest(ctx, offer);
+      await prepare(ctx, request.id, ctx.buyer);
+      ctx.chain.fail = true;
+      const lost = await signPage(ctx, ctx.buyer, KEYS.buyer, request.id);
+      assert.match(lost.response.location, /result=pending/);
+      ctx.records.transact((data) => {
+        const row = data.requests[request.id].chain.actions.find((entry) => entry.kind === "request");
+        row.createdAt = new Date(ctx.clock.now).toISOString();
+      });
+      ctx.clock.now += 3 * 60 * 1000;
+      const expired = await post(ctx.base, ctx.buyer.cookie, `/chain/requests/${request.id}/check`, { csrf_token: ctx.buyer.csrf });
+      assert.match(expired.location, /result=expired/);
+      ctx.chain.fail = false;
+      ctx.chain.next = { state: "confirmed", hash: HASH };
+      const linked = await signPage(ctx, ctx.buyer, KEYS.buyer, request.id);
+      assert.match(linked.response.location, /result=recorded/);
+      ctx.chain.requestOnChain = [
+        ctx.records.chainOfferFor(offer.id).offerKey,
+        ctx.records.companyKeyFor("other-co"),
+        1,
+        0,
+        1,
+        ZERO,
+      ];
+      const proposed = await signPage(ctx, ctx.buyer, KEYS.buyer, request.id);
+      assert.match(proposed.response.location, /result=proposed/);
+      assert.equal(typeof ctx.records.getRequestFor("kings", request.id).chain.proposals["0"].termsHash, "string");
+      const accepted = ctx.records.acceptRequest(person("kings", "user-owner", "Kings"), request.id, TODAY);
+      assert.equal(accepted.ok, true, accepted.error);
+
+      ctx.records.transact((data) => {
+        const chain = data.requests[request.id].chain;
+        const expiredAcceptance = chain.actions.find((entry) => entry.kind === "acceptance");
+        if (expiredAcceptance) expiredAcceptance.status = "expired";
+        chain.actions.push({
+          id: "status-open",
+          kind: "status",
+          counter: null,
+          to: "carrier_pending",
+          seq: 0,
+          signers: [],
+          deadline: Math.floor(ctx.clock.now / 1000) + 600,
+          status: "submitting",
+          txHash: HASH,
+          error: null,
+          createdAt: new Date(ctx.clock.now).toISOString(),
+          updatedAt: new Date(ctx.clock.now).toISOString(),
+        });
+        chain.actions.push({
+          id: "acceptance-late",
+          kind: "acceptance",
+          counter: null,
+          to: null,
+          seq: null,
+          signers: [],
+          deadline: Math.floor(ctx.clock.now / 1000) + 14 * 24 * 60 * 60,
+          status: "expired",
+          txHash: null,
+          error: null,
+          createdAt: new Date(ctx.clock.now).toISOString(),
+          updatedAt: new Date(ctx.clock.now).toISOString(),
+        });
+      });
+      const stored = ctx.records.getRequestFor("kings", request.id);
+      ctx.chain.receiptState = { state: "pending" };
+      ctx.chain.requestOnChain = [ZERO, ZERO, 1, 0, 2, commitmentFromTermsHash(stored.acceptance.termsHash, stored.chain.salts["0"])];
+      const healed = await post(ctx.base, ctx.buyer.cookie, `/chain/requests/${request.id}/check`, { csrf_token: ctx.buyer.csrf });
+      assert.match(healed.location, /result=recorded/);
+      const after = ctx.records.chainRequestFor(request.id);
+      assert.equal(after.actions.find((entry) => entry.id === "acceptance-late").status, "confirmed");
+      assert.equal(after.actions.find((entry) => entry.id === "status-open").status, "submitting");
+    });
+  });
+
   it("does not ask the seller to record a version the chain has already left", async () => {
     await withApp(async (ctx) => {
       seedParties(ctx);
