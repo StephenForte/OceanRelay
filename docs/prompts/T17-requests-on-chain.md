@@ -57,11 +57,17 @@ Reuse lib/commitment.js; do not write a second hashing path.
 - `proposal`, the proposer of the current terms (the buyer for counter null, the seller for counter n):
   - recover the signer, and check it is one of that company's confirmed wallets;
   - store the proposal (signer, deadline, signature, termsHash). Nothing is sent.
-- `accept`, the other party:
-  - recover, and check it is a confirmed wallet of the other company;
-  - one transaction does the off-chain accept and writes `submitting`;
-  - assert that the stored `acceptance.termsHash` equals the proposal's `termsHash`;
+- `accept`, the other party, in D-29's amended order:
+  - **first, with nothing written:**
+    - recover, and check it is a confirmed wallet of the other company;
+    - check the request is linked and confirmed;
+    - check the offer is confirmed on chain at the pinned version and Published, with no offer action in flight;
+    - check the proposal exists and has not expired;
+    - compute the current terms' `termsHash` exactly as `acceptRequest` will, and require it to equal the proposal's;
+  - then one transaction does the off-chain accept and writes `submitting`;
+  - assert again that the stored `acceptance.termsHash` equals the proposal's `termsHash`;
   - submit `recordAcceptance` with both signatures, then apply the result.
+  - **The retry:** once the request is accepted off-chain with no confirmed or in-flight acceptance, `accept` records on chain only. It reuses the stored proposal while that is open; otherwise the proposer re-signs first. The accepter always signs fresh. When D-29 says the chain can no longer accept it, the page says so, and nothing is sent.
 - `status`, either party: the next unsigned carrier status from `fulfilment.history`, with `seq` = the chain's status count.
 - `cancellation`, either party, once the off-chain request is `cancelled`:
   - the first signature is stored;
@@ -110,6 +116,10 @@ Reuse lib/commitment.js; do not write a second hashing path.
 - Statuses go in `fulfilment.history` order.
 - Once cancelled off-chain, cancellation comes before unsigned statuses.
 - One action in flight per request. The `submitting` row is written before `submit` (assert the order). Two concurrent accepts produce one submit and one off-chain acceptance, with D-18's availability still enforced.
+- **A failed acceptance is not a dead end.**
+  - Each pre-check failure leaves the request untouched off-chain, with nothing sent: an expired proposal; a terms mismatch; the offer paused on chain; the offer's chain version moved on; a request not yet linked.
+  - After a `refused`, `reverted` or `expired` acceptance, the request is accepted off-chain, and "Record acceptance" is offered. With the proposal still open it confirms after only the accepter signs again. With the proposal expired, the proposer re-signs first, then it confirms.
+  - After a `StaleVersion`, the page says it cannot be recorded, and nothing is sent.
 
 **6. Reads, chain down, migration.**
 - The chain request page, the request page and the marketplace detail write nothing and make zero RPC calls.
@@ -204,6 +214,7 @@ Open a **draft** PR (the repo merges with merge commits). Put this block, filled
     SERVER-BUILT: tampered counter/commitment/seq/requestKey/status → refused: yes/no
     SIGNERS:     third company / pending / unbound / relayer / seller Request / buyer counter proposal → refused: yes/no
     ORDER:       request before acceptance; statuses in order; cancellation before unsigned statuses; submitting before submit; concurrent accepts → one submit and one acceptance: yes/no
+    ACCEPT RETRY: pre-check failures leave off-chain untouched; refused/reverted/expired acceptance → "Record acceptance" confirms (proposal open, and re-signed); StaleVersion → nothing sent: yes/no
     READS:       chain request page, request page, market detail write nothing and make 0 RPC calls: yes/no
     CHAIN DOWN:  degraded/disabled/misconfigured → off-chain unaffected except on-chain accept: yes/no
     ANVIL:       link / listed acceptance / counter acceptance / two statuses / cancellation confirmed and getRequest matches; replay → DigestUsed: yes/no
@@ -217,4 +228,4 @@ Open a **draft** PR (the repo merges with merge commits). Put this block, filled
 
 Disclosing a gap counts as diligence, not failure.
 
-/goal T17 is done when requests on an on-chain offer are linked, accepted with both companies' signatures over the exact off-chain terms hash, and followed by signed statuses and a two-signature cancellation, per D-29 and C-18: schema 7 migrates a populated v6 file losslessly; the proposal termsHash equals the off-chain acceptance.termsHash; same-company, wrong-proposer, tampered, missing, expired and stale signatures are refused before anything is written or sent; the existing accept route is gated on on-chain offers and unchanged elsewhere; only the right companies' confirmed wallets sign; order and the in-flight rules hold, with concurrent accepts sending once; pages never write or call the chain; npm run test:chain confirms link, both acceptances, two statuses, cancellation and a DigestUsed replay on anvil; task/T17-requests-on-chain, rebased on current main, passes node --check, npm test (0 skipped), npm run test:chain and forge test; and the draft PR shows Semgrep, Trivy and Bugbot passing, with the filled-in handoff. Keep the PR merge-ready by fixing CI and bot findings within this scope only.
+/goal T17 is done when requests on an on-chain offer are linked, accepted with both companies' signatures over the exact off-chain terms hash, and followed by signed statuses and a two-signature cancellation, per D-29 and C-18: schema 7 migrates a populated v6 file losslessly; the proposal termsHash equals the off-chain acceptance.termsHash; same-company, wrong-proposer, tampered, missing, expired and stale signatures are refused before anything is written or sent; the existing accept route is gated on on-chain offers and unchanged elsewhere; only the right companies' confirmed wallets sign; order and the in-flight rules hold, with concurrent accepts sending once; acceptance is pre-checked before any write, and a failed acceptance can be retried on chain only to confirmed; pages never write or call the chain; npm run test:chain confirms link, both acceptances, two statuses, cancellation and a DigestUsed replay on anvil; task/T17-requests-on-chain, rebased on current main, passes node --check, npm test (0 skipped), npm run test:chain and forge test; and the draft PR shows Semgrep, Trivy and Bugbot passing, with the filled-in handoff. Keep the PR merge-ready by fixing CI and bot findings within this scope only.
