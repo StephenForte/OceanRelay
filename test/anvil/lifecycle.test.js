@@ -8,6 +8,7 @@ const path = require("node:path");
 const net = require("node:net");
 const vm = require("node:vm");
 const { createChain } = require("../../lib/chain");
+const { commitmentFromTermsHash } = require("../../lib/commitment");
 const { openKey } = require("../../lib/chain/keys");
 const { keccakHex } = require("../../lib/chain/keccak");
 const { hexToBytes } = require("../../lib/chain/hex");
@@ -28,6 +29,9 @@ const KEYS = {
   buyer: "0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a",
   stranger: "0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba",
   offer: "0x92db14e403b83dfe3df233f83dfa3a0d7096f21ca9b0d6d6b8d88b2b4ec1564e",
+  // Anvil default accounts 7 and 8. Test only. The earlier calls already bind 0–6.
+  requestSeller: "0x4bbbf85ce3377467afe5d46f804f221813b2bb87f24d81f60f1fcdbf7cbf4356",
+  requestBuyer: "0xdbda1821b80551c9d65939329250298aa3472ba22feea921c0cf5d620ea67b97",
 };
 
 const DEADLINE = 1893456000;
@@ -318,6 +322,10 @@ describe("anvil ledger", () => {
         runtimeCodeHash: keccakHex(hexToBytes(code)),
         scratch,
       });
+    });
+
+    await t.test("records a request, both acceptances, statuses and cancellation through the HTTP routes", async () => {
+      await recordRequestsOverHttp(scratch);
     });
   });
 });
@@ -803,6 +811,307 @@ async function recordOfferOverHttp({ url, address, genesisHash, runtimeCodeHash,
     stored = await onChain();
     assert.equal(chainNumber(stored[3]), 4);
     assert.equal(records.chainOfferFor(offer.id).confirmed.state, "expired");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
+async function recordRequestsOverHttp(scratch) {
+  const port = await freePort();
+  const url = `http://127.0.0.1:${port}`;
+  const log = fs.openSync(path.join(scratch, "request-anvil.log"), "a");
+  const chainNode = spawn("anvil", ["--host", "127.0.0.1", "--port", String(port), "--chain-id", "31337", "--silent"], {
+    env,
+    stdio: ["ignore", log, log],
+  });
+  try {
+    await waitForAnvil(url);
+    const relayer = openKey(KEYS.relayer);
+    const registrar = openKey(KEYS.registrar);
+    await run("forge", [
+      "script",
+      "script/Deploy.s.sol",
+      "--rpc-url",
+      url,
+      "--broadcast",
+      "--private-key",
+      KEYS.owner,
+      "--sender",
+      openKey(KEYS.owner).address,
+    ], {
+      cwd: CONTRACTS,
+      env: {
+        ...env,
+        RELAYER_ADDRESS: relayer.address,
+        REGISTRAR_ADDRESS: registrar.address,
+      },
+    });
+    const broadcast = JSON.parse(fs.readFileSync(
+      path.join(CONTRACTS, "broadcast/Deploy.s.sol/31337/run-latest.json"),
+      "utf8"
+    ));
+    const created = broadcast.transactions.find((tx) => tx.contractAddress);
+    const address = created.contractAddress;
+    const code = await rpc(url, "eth_getCode", [address, "latest"]);
+    const genesis = await rpc(url, "eth_getBlockByNumber", ["0x0", false]);
+    await recordRequestsOnChain({
+      url,
+      address,
+      genesisHash: genesis.hash,
+      runtimeCodeHash: keccakHex(hexToBytes(code)),
+      scratch,
+    });
+  } finally {
+    if (chainNode.exitCode == null) chainNode.kill("SIGTERM");
+  }
+}
+
+async function recordRequestsOnChain({ url, address, genesisHash, runtimeCodeHash, scratch }) {
+  const recordsPath = path.join(scratch, "request-records.json");
+  const config = loadConfig({
+    RATE_NINJA_CLIENT_ID: "capacity-exchange",
+    RATE_NINJA_CLIENT_SECRET: "anvil-client-secret",
+    SESSION_SECRET: HTTP_SESSION,
+    TOKEN_ENCRYPTION_KEY: "anvil-token-encryption-key",
+    RATE_NINJA_BASE_URL: "http://127.0.0.1:9",
+    OCEANRELAY_REDIRECT_URI: "http://127.0.0.1:9/oauth/callback",
+    OCEANRELAY_RECORDS_PATH: recordsPath,
+    OCEANRELAY_STORE_PATH: path.join(scratch, "request-store.json"),
+    OCEANRELAY_RELAYER_KEY: KEYS.relayer,
+    OCEANRELAY_REGISTRAR_KEY: KEYS.registrar,
+    CF_ACCESS_CLIENT_ID: "anvil-access-id",
+    CF_ACCESS_CLIENT_SECRET: "anvil-access-secret",
+    FORTEL2_READ_RPC: url,
+    FORTEL2_WRITE_RPC: url,
+    OCEANRELAY_CHAIN_MAX_FEE_GWEI: "100",
+  });
+  const store = openStore(config.storePath, config.tokenEncryptionKey);
+  const records = openRecords(recordsPath);
+  const sellerIdentity = {
+    companyId: "anvil-req-seller",
+    sub: "user-req-seller",
+    companyName: "Anvil Request Seller",
+  };
+  const buyerIdentity = {
+    companyId: "anvil-req-buyer",
+    sub: "user-req-buyer",
+    companyName: "Anvil Request Buyer",
+  };
+  function seed(sid, csrf, profile) {
+    store.saveConnection(sid, {
+      refreshToken: `refresh-${sid}`,
+      scopes: ["profile:read", "rates:read", "sailings:read"],
+      profile: {
+        companyType: "Contract Owner",
+        active: true,
+        name: profile.companyName,
+        ...profile,
+      },
+    });
+    const value = encodeURIComponent(signSession({ sid, csrf, iat: Date.now() }, HTTP_SESSION));
+    return `${COOKIE_NAME}=${value}`;
+  }
+  const sellerCookie = seed("sid-req-seller", "csrf-req-seller", sellerIdentity);
+  const buyerCookie = seed("sid-req-buyer", "csrf-req-buyer", buyerIdentity);
+  const server = createServer({
+    config,
+    store,
+    records,
+    deployment: {
+      chainId: 31337,
+      genesisHash,
+      address,
+      runtimeCodeHash,
+    },
+  });
+  const reader = createChain({
+    config,
+    deployment: { chainId: 31337, genesisHash, address, runtimeCodeHash },
+    pollIntervalMs: 50,
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const readyDeadline = Date.now() + 15_000;
+    let chainState = "";
+    while (Date.now() < readyDeadline) {
+      const configBody = await (await fetch(`${base}/config`)).json();
+      chainState = configBody.chain && configBody.chain.state;
+      if (chainState === "ready") break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.equal(chainState, "ready");
+    await reader.start();
+
+    async function bind(cookie, csrf, privateKey) {
+      const prepared = await fetch(`${base}/wallet/prepare`, {
+        method: "POST",
+        redirect: "manual",
+        headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ csrf_token: csrf }),
+      });
+      assert.equal(prepared.status, 303);
+      const page = await (await fetch(`${base}/wallet`, { headers: { cookie } })).text();
+      const signed = await browserSignature(page, privateKey);
+      const response = await fetch(`${base}/wallet/bind`, {
+        method: "POST",
+        redirect: "manual",
+        headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          csrf_token: csrf,
+          wallet: signed.wallet,
+          deadline: signed.deadline,
+          signature: signed.signature,
+        }),
+      });
+      assert.equal(response.headers.get("location"), "/wallet?result=bound");
+    }
+
+    await bind(sellerCookie, "csrf-req-seller", KEYS.requestSeller);
+    await bind(buyerCookie, "csrf-req-buyer", KEYS.requestBuyer);
+    assert.equal(records.walletsFor("anvil-req-seller")[0].state, "confirmed");
+    assert.equal(records.walletsFor("anvil-req-buyer")[0].state, "confirmed");
+
+    const today = new Date().toISOString().slice(0, 10);
+    const offer = records.createOffer(sellerIdentity, { source: "manual", terms: offerTerms() });
+    const preparedOffer = await fetch(`${base}/chain/offers/${offer.id}/prepare`, {
+      method: "POST",
+      redirect: "manual",
+      headers: { cookie: sellerCookie, "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ csrf_token: "csrf-req-seller" }),
+    });
+    assert.equal(preparedOffer.status, 303);
+    const offerPage = await (await fetch(`${base}/chain/offers/${offer.id}`, { headers: { cookie: sellerCookie } })).text();
+    const offerSigned = await browserChainSignature(offerPage, KEYS.requestSeller);
+    const published = await fetch(`${base}/chain/offers/${offer.id}/sign`, {
+      method: "POST",
+      redirect: "manual",
+      headers: { cookie: sellerCookie, "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        csrf_token: "csrf-req-seller",
+        kind: offerSigned.kind,
+        deadline: offerSigned.deadline,
+        signature: offerSigned.signature,
+      }),
+    });
+    assert.equal(published.headers.get("location"), `/chain/offers/${offer.id}?result=recorded`);
+    assert.equal(records.getCompanyOffer("anvil-req-seller", offer.id).state, "published");
+
+    async function pageOf(cookie, requestId) {
+      return (await fetch(`${base}/chain/requests/${requestId}`, { headers: { cookie } })).text();
+    }
+
+    async function signRequest(cookie, csrf, privateKey, requestId) {
+      let html = await pageOf(cookie, requestId);
+      if (html.includes('id="chain-prepare"')) {
+        const prepared = await fetch(`${base}/chain/requests/${requestId}/prepare`, {
+          method: "POST",
+          redirect: "manual",
+          headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ csrf_token: csrf }),
+        });
+        assert.equal(prepared.status, 303, "prepare");
+        html = await pageOf(cookie, requestId);
+      }
+      assert.match(html, /id="chain-sign"/, html.slice(0, 800));
+      const signed = await browserChainSignature(html, privateKey);
+      const response = await fetch(`${base}/chain/requests/${requestId}/sign`, {
+        method: "POST",
+        redirect: "manual",
+        headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          csrf_token: csrf,
+          kind: signed.kind,
+          deadline: signed.deadline,
+          signature: signed.signature,
+        }),
+      });
+      return { location: response.headers.get("location"), signed };
+    }
+
+    function storedCommitment(requestId, saltKey) {
+      const request = records.getRequestFor("anvil-req-seller", requestId);
+      const chain = records.chainRequestFor(requestId);
+      return commitmentFromTermsHash(request.acceptance.termsHash, chain.salts[saltKey]);
+    }
+
+    const listed = records.createRequest(buyerIdentity, offer.id, 1, 2, today);
+    assert.equal(listed.ok, true, listed.error);
+    const linked = await signRequest(buyerCookie, "csrf-req-buyer", KEYS.requestBuyer, listed.request.id);
+    assert.equal(linked.location, `/chain/requests/${listed.request.id}?result=recorded`, linked.location);
+    assert.equal(records.chainRequestFor(listed.request.id).confirmed.recorded, true);
+
+    const proposed = await signRequest(buyerCookie, "csrf-req-buyer", KEYS.requestBuyer, listed.request.id);
+    assert.equal(proposed.location, `/chain/requests/${listed.request.id}?result=proposed`);
+    const accepted = await signRequest(sellerCookie, "csrf-req-seller", KEYS.requestSeller, listed.request.id);
+    assert.equal(accepted.location, `/chain/requests/${listed.request.id}?result=recorded`, accepted.location);
+    assert.equal(accepted.signed.message.counter, 0);
+    assert.equal(records.getRequestFor("anvil-req-seller", listed.request.id).state, "accepted");
+    let onChain = await reader.call("getRequest", [records.chainRequestFor(listed.request.id).requestKey]);
+    assert.equal(chainNumber(onChain[4]), 2);
+    assert.equal(String(onChain[5]).toLowerCase(), storedCommitment(listed.request.id, "0").toLowerCase());
+
+    const countered = records.createRequest(buyerIdentity, offer.id, 1, 1, today);
+    assert.equal(countered.ok, true, countered.error);
+    const secondLink = await signRequest(buyerCookie, "csrf-req-buyer", KEYS.requestBuyer, countered.request.id);
+    assert.equal(secondLink.location, `/chain/requests/${countered.request.id}?result=recorded`);
+    const counter = records.counterRequest(sellerIdentity, countered.request.id, {
+      quantity: 1,
+      unitBuyerMinor: 2400,
+      serviceTerms: "CY/CY",
+    }, today);
+    assert.equal(counter.ok, true, counter.error);
+    const counterProposal = await signRequest(sellerCookie, "csrf-req-seller", KEYS.requestSeller, countered.request.id);
+    assert.equal(counterProposal.location, `/chain/requests/${countered.request.id}?result=proposed`, counterProposal.location);
+    const counterAccept = await signRequest(buyerCookie, "csrf-req-buyer", KEYS.requestBuyer, countered.request.id);
+    assert.equal(counterAccept.location, `/chain/requests/${countered.request.id}?result=recorded`, counterAccept.location);
+    assert.equal(counterAccept.signed.message.counter, 1);
+    assert.equal(records.chainRequestFor(countered.request.id).confirmed.acceptedCounter, 1);
+    onChain = await reader.call("getRequest", [records.chainRequestFor(countered.request.id).requestKey]);
+    assert.equal(chainNumber(onChain[4]), 2);
+    assert.equal(String(onChain[5]).toLowerCase(), storedCommitment(countered.request.id, "1").toLowerCase());
+
+    const pending = records.recordCarrierStatus(sellerIdentity, listed.request.id, "carrier_pending", "booked");
+    assert.equal(pending.ok, true, pending.error);
+    const pendingSigned = await signRequest(sellerCookie, "csrf-req-seller", KEYS.requestSeller, listed.request.id);
+    assert.equal(pendingSigned.location, `/chain/requests/${listed.request.id}?result=recorded`, pendingSigned.location);
+    assert.equal(pendingSigned.signed.message.seq, 0);
+    assert.equal(pendingSigned.signed.message.status, 3);
+    onChain = await reader.call("getRequest", [records.chainRequestFor(listed.request.id).requestKey]);
+    assert.equal(chainNumber(onChain[3]), 1);
+    assert.equal(chainNumber(onChain[4]), 3);
+
+    const confirmed = records.recordCarrierStatus(buyerIdentity, listed.request.id, "carrier_confirmed", "confirmed");
+    assert.equal(confirmed.ok, true, confirmed.error);
+    const confirmedSigned = await signRequest(buyerCookie, "csrf-req-buyer", KEYS.requestBuyer, listed.request.id);
+    assert.equal(confirmedSigned.location, `/chain/requests/${listed.request.id}?result=recorded`, confirmedSigned.location);
+    assert.equal(confirmedSigned.signed.message.seq, 1);
+    assert.equal(confirmedSigned.signed.message.status, 4);
+    onChain = await reader.call("getRequest", [records.chainRequestFor(listed.request.id).requestKey]);
+    assert.equal(chainNumber(onChain[3]), 2);
+    assert.equal(chainNumber(onChain[4]), 4);
+
+    const proposal = records.proposeCancellation(sellerIdentity, listed.request.id, "schedule change");
+    assert.equal(proposal.ok, true, proposal.error);
+    const agreed = records.agreeCancellation(buyerIdentity, listed.request.id);
+    assert.equal(agreed.ok, true, agreed.error);
+    const firstCancel = await signRequest(buyerCookie, "csrf-req-buyer", KEYS.requestBuyer, listed.request.id);
+    assert.equal(firstCancel.location, `/chain/requests/${listed.request.id}?result=proposed`);
+    const secondCancel = await signRequest(sellerCookie, "csrf-req-seller", KEYS.requestSeller, listed.request.id);
+    assert.equal(secondCancel.location, `/chain/requests/${listed.request.id}?result=recorded`, secondCancel.location);
+    onChain = await reader.call("getRequest", [records.chainRequestFor(listed.request.id).requestKey]);
+    assert.equal(chainNumber(onChain[4]), 8);
+    assert.equal(records.chainRequestFor(listed.request.id).confirmed.cancelled, true);
+
+    const replay = await reader.submit("recordRequest", [
+      linked.signed.message.requestId,
+      linked.signed.message.offerId,
+      linked.signed.message.version,
+      linked.signed.message.deadline,
+      linked.signed.signature,
+    ]);
+    assert.equal(replay.state, "refused");
+    assert.equal(replay.error && replay.error.name, "DigestUsed");
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
