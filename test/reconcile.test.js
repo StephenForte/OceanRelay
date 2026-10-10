@@ -101,6 +101,37 @@ describe("reconciliation comparison", () => {
     assert.equal(findings.some((item) => item.kind === "unknown"), false);
   });
 
+  it("does not adopt a revoke once the wallet is bound again", () => {
+    const records = openRecords(null);
+    const sellerKey = records.ensureCompanyKey(SELLER.companyId).companyKey;
+    const buyerKey = records.ensureCompanyKey(BUYER.companyId).companyKey;
+    const rebound = "0x00000000000000000000000000000000000000Cd";
+    const moved = "0x00000000000000000000000000000000000000Ef";
+    records.transact((draft) => {
+      draft.companies[SELLER.companyId].wallets.push({ wallet: rebound, state: "confirmed", txHash: TX });
+      draft.companies[BUYER.companyId].wallets.push({ wallet: moved, state: "confirmed", txHash: TX });
+    });
+    const events = [
+      { name: "WalletRevoked", args: { wallet: rebound, companyKey: sellerKey }, transactionHash: TX, blockNumber: 3, logIndex: 0 },
+      { name: "WalletBound", args: { wallet: rebound, companyKey: sellerKey }, transactionHash: TX, blockNumber: 4, logIndex: 0 },
+      { name: "WalletRevoked", args: { wallet: moved, companyKey: buyerKey }, transactionHash: TX, blockNumber: 5, logIndex: 0 },
+      { name: "WalletBound", args: { wallet: moved, companyKey: sellerKey }, transactionHash: TX, blockNumber: 6, logIndex: 0 },
+    ];
+    const findings = compareRecords(snapshot(records), events, {
+      wallets: {
+        [rebound.toLowerCase()]: sellerKey,
+        [moved.toLowerCase()]: sellerKey,
+      },
+      offers: {},
+      requests: {},
+    });
+    assert.equal(byReason(findings, "wallet_revoked").length, 0);
+    const other = byReason(findings, "wallet_other_company");
+    assert.equal(other.length, 1);
+    assert.equal(other[0].adoptable, false);
+    assert.equal(other[0].subject.wallet, moved);
+  });
+
   it("adopts an offer action only when the commitment, version, seq and company key match", () => {
     const records = openRecords(null);
     const companyKey = records.ensureCompanyKey(SELLER.companyId).companyKey;
