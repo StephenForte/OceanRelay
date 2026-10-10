@@ -138,7 +138,7 @@ Tasks, in order. Each runs after the previous one merges.
 | T14 | Wallet binding (D-27, C-16): `/wallet` with the wallet-page script and its CSP (D-25), the EIP-712 `Binding` signed in the browser and co-signed by the registrar, records schema 5 (`companies`), and the `wallet.bound` audit event | `lib/routes/wallet.js`, `lib/views/wallet.js`, the script | **strongest** (raised from strong: a migration, the authorization boundary T15 relies on, and the first page script) | **approved 2026-10-08**: PR #53 at `e41aff8`, after two rounds (§6). Prompt: `docs/prompts/T14-wallet-binding.md`. |
 | T15 | Offers on chain (D-28, C-17): `/chain/offers/:id` signing pages, salted offer keys and version commitments (C-10 canonical form, buyer-visible only), publish from a draft, `publishVersion` in order, pause and resume, `markExpired`, records schema 6, and the chain line on the offer and marketplace pages | `lib/routes/chain-offers.js`, `lib/views/chain-offers.js`, the commitment module | strongest | **approved 2026-10-09**: PR #57 at `0846c8b`, after two rounds (§6). Prompt: `docs/prompts/T15-offers-on-chain.md`. |
 | T17 | Requests on chain (D-29, C-18): `/chain/requests/:id` signing pages; linking with `recordRequest`; the two-signature acceptance (the proposer signs the terms, the accepter signs with "Accept and sign"), with the commitment over C-10's exact `termsHash`; signed carrier statuses in order; the two-signature cancellation; the existing accept route gated for on-chain offers; records schema 7 | `lib/routes/chain-requests.js`, `lib/views/chain-requests.js` | strongest | **approved 2026-10-09**: PR #61 at `c23f75e` (§6). Prompt: `docs/prompts/T17-requests-on-chain.md`. |
-| T16 | Operator reconciliation: compare the records with chain events and flag mismatches; a repair is an audited correction | — | strong | after T17 |
+| T16 | Reconciliation (D-30, C-19): `chain.events` (a C-15 extension, read RPC only, 50,000-block chunks); a pure comparison of the records with the chain events and views; the operator report at `/operator/chain`; four audited adoption cases (`chain.corrected`); the `revoked` wallet state. No sending, no signing, no schema change | `lib/routes/operator-chain.js`, `lib/views/operator-chain.js`, the comparison module | strong | **ready 2026-10-10**: `docs/prompts/T16-reconciliation.md`. Dispatch after this docs PR merges. |
 | A-5 | Phase 5 acceptance on the deployed service | operator | — | after T16 |
 
 ### Phase 5 inputs
@@ -1121,6 +1121,20 @@ The operator reported every step passed:
   - result: `MATCH: version 1 commitment equals the chain`;
   - the planner tested the command first on a throwaway file: MATCH for the right commitment, MISMATCH for a wrong one, and the file left byte-identical.
 - This is the PRD's Phase 5 "how you know it's done" for a publish: verifiable on chain 852, committing to the off-chain version, with price, margin, company and customer unreadable.
+
+### 2026-10-10 — The first real request and two-company acceptance on chain 852 (operator), verified by the planner (A-5 evidence)
+
+- **What the operator did:** after T17 deployed (`main` `a55ef6c`), bound a second company's wallet, requested the on-chain offer as that buyer, linked it, signed the listed terms, and accepted and signed as the seller.
+- **Planner checks against the sequencer:**
+  - **The buyer wallet:** `WalletBound` in block 2,080,338 (tx `0xeaa6…`), company `0xc613…`, wallet `0xF1A9680F438aB368B6c3168a8D838aFE06C7593b`. It matches none of the default-mnemonic accounts 0–29.
+  - **The link:** tx `0x21d143293228bea91d44ccb5d7bd98d9c1008a5ad978f7b3300c03df04272ecd`, status 1, block 2,080,433, `recordRequest`. `RequestRecorded` shows request key `0x0127…3c50`, offer `0xa3d7…8774`, buyer company `0xc613…`, version 1, signer `0xF1A9…`.
+  - **The acceptance:** tx `0x1d3c843e495ed0377cc5de7d8010ada29d4b549edc265cbda0221edd21a3d086`, status 1, block 2,080,578, 104,921 gas, `recordAcceptance` with counter 0 (the listed terms), commitment `0x5246…cb72`, and signers `0xF1A9…` (the buyer, proposer) and `0xb849…` (the seller, accepter), whose companies are `0xc613…` and `0x34b6…`.
+  - **`getRequest`:** offer `0xa3d7…`, buyer company `0xc613…`, version 1, `statusSeq` 0, status 2 (Accepted), the same commitment.
+  - **The proposal deadline** is 2026-10-24 01:02 UTC, 14 days after signing (D-29).
+- **The commitment, checked without the salt or the terms hash leaving the server:**
+  - the Render Shell read-only `node -e` (records JSON, then `commitmentFromTermsHash`) printed `MATCH: the acceptance commitment equals the chain`;
+  - the planner tested the command first: MATCH, MISMATCH, and the file unchanged. It deliberately prints no hash, because C-10 keeps the terms hash server-side.
+- **With 2026-10-09's publish, this meets the PRD's Phase 5 "how you know it's done"** on the live chain: a publish and an acceptance, both verifiable on chain ID 852, each committing to the off-chain terms, with price, margin, company and customer unreadable from the chain. A-5 still needs T16 (reconciliation) and the operator's own pass.
 
 ---
 
