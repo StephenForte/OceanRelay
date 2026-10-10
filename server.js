@@ -15,11 +15,12 @@ const offerRoutes = require("./lib/routes/offers");
 const marketRoutes = require("./lib/routes/market");
 const requestRoutes = require("./lib/routes/requests");
 const operatorRoutes = require("./lib/routes/operator");
+const operatorChainRoutes = require("./lib/routes/operator-chain");
 const walletRoutes = require("./lib/routes/wallet");
 const chainOfferRoutes = require("./lib/routes/chain-offers");
 const chainRequestRoutes = require("./lib/routes/chain-requests");
 
-const areas = [systemRoutes, connectRoutes, offerRoutes, marketRoutes, requestRoutes, operatorRoutes, walletRoutes, chainOfferRoutes, chainRequestRoutes];
+const areas = [systemRoutes, connectRoutes, offerRoutes, marketRoutes, requestRoutes, operatorRoutes, operatorChainRoutes, walletRoutes, chainOfferRoutes, chainRequestRoutes];
 
 const accessTokens = new Map();
 const refreshInflight = new Map();
