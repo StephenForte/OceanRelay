@@ -720,6 +720,43 @@ Neither the planner nor any worker handles a private key.
   - with the chain not ready, nothing is signed and off-chain behaviour is unchanged, except that accepting a request on an on-chain offer waits for the chain.
 - **Not in T17:** operator wallets; reconciliation and repair (T16); disputes on chain (there are none); a request on an offer that is not on chain.
 
+### D-30 — Reconciliation: the operator compares the records with the chain, and repairs only by audited adoption (2026-10-09)
+
+**Facts it rests on** (planner, 2026-10-09):
+- PRD Phase 5: "The operator can compare OceanRelay's records with the chain and flag a mismatch. Repair is a new audited correction, not a quiet overwrite."
+- **The ledger's events** (committed ABI): `WalletBound`, `WalletRevoked`, `OfferPublished`, `VersionPublished`, `OfferStateSet`, `OfferExpired`, `RequestRecorded`, `AcceptanceRecorded`, `StatusRecorded`, `CancellationRecorded`, plus the owner events. The views are `walletCompany`, `getOffer` and `getRequest`.
+- **Measured on the sequencer, 2026-10-09:** `eth_getLogs` for the ledger from the deploy block 1,991,782 to 2,080,883 (89,101 blocks) returned 8 logs in under 1 s. The chain adds about 43,000 blocks a day.
+- **C-15 has no event read.** T16 adds one.
+- **Cases the reviews of T14, T15 and T17 left for T16:**
+  - a chain action that landed after the records marked it `expired` (the T14 binding race; T15's `DuplicateOffer` on a publish retry; any late landing);
+  - an acceptance the chain can no longer take (`StaleVersion`);
+  - carrier statuses never signed before a cancellation;
+  - operator-recorded statuses (no operator wallet);
+  - a wallet revoked by the owner.
+
+**Rules:**
+- **Who:** operators only (D-16), behind the existing operator gate and its byte-identical 404.
+- **Running it:**
+  - `POST /operator/chain/reconcile` reads the chain: the events from the deployment block in chunks of 50,000 blocks, plus `walletCompany`, `getOffer` and `getRequest` for every key the records know.
+  - It compares the two sides and **renders the report as the POST's response** (200, CSRF-checked).
+  - A run writes nothing and is not audited; it is a read (D-21).
+  - `GET /operator/chain` shows only the form and makes no RPC call.
+- **Findings** are of three kinds:
+  - **Mismatch:** the records and the chain disagree about something already recorded.
+  - **Unknown on chain:** an event whose `offerId`, `requestId` or `companyKey` the records do not know.
+  - **Lag:** an off-chain change not yet signed. This is information, not a mismatch.
+  - Every finding names its record (company, offer or request id), what the records say, what the chain says, and the transaction that shows it.
+- **Repair is adoption only, and only where the chain is authoritative and consistent with the records.** One button per adoptable finding: `POST /operator/chain/adopt` with a finding id. The server re-reads that one item from the chain, re-checks every condition, writes the correction in one transaction, appends an audit entry `chain.corrected`, and redirects. The adoptable cases:
+  1. A wallet bound on chain to the company's own key while the records say `expired`, `refused` or `reverted` → `confirmed`.
+  2. An offer action that landed (the chain's version, state and commitment match exactly what the records hold for that action) while the records say `expired`, `refused` or `reverted` → `confirmed`, and `confirmed` moves forward.
+  3. The same for a request action, matched by `requestKey`, status, `seq`, and the acceptance commitment computed from the records.
+  4. A wallet revoked on chain (`WalletRevoked`, or `walletCompany` now zero) while the records say `confirmed` → `revoked`. This is a new terminal wallet state, so it no longer counts as usable.
+  - Nothing else is adoptable: an acceptance the chain refused, a chain ahead of the records in a way the records cannot explain, unknown keys, lag. These are flagged with a plain explanation and left for a person.
+  - **Repair never sends a transaction**, never signs, and never changes an off-chain marketplace fact (an offer's state, a request's state, a fulfilment status). It only corrects the chain bookkeeping that C-16, C-17 and C-18 keep. So the §8 rule for combined actions does not apply: there is no chain step to retry.
+- **A stale report is harmless:** each adoption re-reads and re-checks at the moment it is applied, and refuses if the finding no longer holds.
+- **Chain not ready:** the POST says the chain is unavailable. Nothing else changes.
+- **Not in T16:** sending corrections to the chain; operator wallets; any change to how the marketplace behaves.
+
 ## Interface contracts
 
 A contract is the surface other tasks build on. The task named as owner publishes it; later
@@ -1225,3 +1262,28 @@ requests[id].chain = {
 - The marketplace detail of an on-chain offer shows D-29's sentence.
 
 **Extension to C-12:** a new event, `request.chain_recorded`. It is written when an action becomes `confirmed`. Actor: the user who ran it, role `buyer` or `seller`. Subject: `offerId`, `requestId` and `version`. `detail.to` is the action kind, or the status.
+
+### C-19 — Reconciliation report and adoption (owner: T16; implements D-30; extends C-12, C-15 and C-16)
+
+**C-15 extension:** `chain.events({ fromBlock, toBlock })` reads the ledger's logs from the read RPC (never the write host) and decodes them with the committed ABI. It returns `[{ name, args, blockNumber, transactionHash, logIndex }]`, in chain order. It throws on an outage, which the route shows as "chain unavailable". Ranges over 50,000 blocks are split.
+
+**C-16 extension:** a wallet `state` may also be `revoked`. It is terminal, and is not counted as active or usable.
+
+**A finding** (not stored; built per run):
+
+```
+{ id,                                   // stable: hash of kind + subject + chain tx
+  kind: "mismatch" | "unknown" | "lag",
+  subject: { companyId?, offerId?, requestId?, wallet? },
+  records: <short description>, chain: <short description>, txHash: "0x…" | null,
+  adoptable: bool, reason: <fixed code> }
+```
+
+**Routes** (operators only; anyone else gets the existing byte-identical operator 404):
+- `GET /operator/chain`: the form; no RPC call.
+- `POST /operator/chain/reconcile`: runs D-30's comparison and renders the report (200).
+- `POST /operator/chain/adopt`: fields `csrf_token` and `finding`. Re-reads, re-checks, writes, audits, then 303 to `/operator/chain`, with a result code.
+
+**Extension to C-12:** a new event, `chain.corrected`. Actor: the operator, role `operator`. Subject: whichever of `offerId`, `requestId` and `wallet` apply. `detail.reason` is the adoption case: `wallet_bound`, `offer_landed`, `request_landed` or `wallet_revoked`. `detail.to` is the new state. Nothing else.
+
+**No schema change.** Adoption edits existing C-16, C-17 and C-18 fields only, plus the new `revoked` wallet state.
