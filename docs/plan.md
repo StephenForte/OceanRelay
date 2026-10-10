@@ -139,6 +139,7 @@ Tasks, in order. Each runs after the previous one merges.
 | T15 | Offers on chain (D-28, C-17): `/chain/offers/:id` signing pages, salted offer keys and version commitments (C-10 canonical form, buyer-visible only), publish from a draft, `publishVersion` in order, pause and resume, `markExpired`, records schema 6, and the chain line on the offer and marketplace pages | `lib/routes/chain-offers.js`, `lib/views/chain-offers.js`, the commitment module | strongest | **approved 2026-10-09**: PR #57 at `0846c8b`, after two rounds (§6). Prompt: `docs/prompts/T15-offers-on-chain.md`. |
 | T17 | Requests on chain (D-29, C-18): `/chain/requests/:id` signing pages; linking with `recordRequest`; the two-signature acceptance (the proposer signs the terms, the accepter signs with "Accept and sign"), with the commitment over C-10's exact `termsHash`; signed carrier statuses in order; the two-signature cancellation; the existing accept route gated for on-chain offers; records schema 7 | `lib/routes/chain-requests.js`, `lib/views/chain-requests.js` | strongest | **approved 2026-10-09**: PR #61 at `c23f75e` (§6). Prompt: `docs/prompts/T17-requests-on-chain.md`. |
 | T16 | Reconciliation (D-30, C-19): `chain.events` (a C-15 extension, read RPC only, 50,000-block chunks); a pure comparison of the records with the chain events and views; the operator report at `/operator/chain`; four audited adoption cases (`chain.corrected`); the `revoked` wallet state. No sending, no signing, no schema change | `lib/routes/operator-chain.js`, `lib/views/operator-chain.js`, the comparison module | strong | **approved 2026-10-10**: PR #64 at `8dc8450` (§6). Prompt: `docs/prompts/T16-reconciliation.md`. |
+| T18 | F-18 fix: Reconcile must not report a failed wallet row (`refused`, `expired`, `reverted`) as `wallet_other_company`; only a `confirmed` row bound elsewhere is a mismatch (D-30 as clarified) | `lib/reconcile.js` (one branch), `test/reconcile.test.js` | strong | **ready 2026-10-10**: the prompt is in the planner's chat (small task). |
 | A-5 | Phase 5 acceptance on the deployed service | operator | — | after T16 |
 
 ### Phase 5 inputs
@@ -869,6 +870,14 @@ The operator merged #32 by accident before the planner review. The review then r
   - **No send:** `submit` 0 and `registrarSign` 0 across the whole run.
   - **Revoked:** the signer checks require `confirmed` (`chain-offers.js:171`, `chain-requests.js:198`), and `WALLET_ACTIVE` excludes `revoked`.
 - **A-5 will exercise it:** the operator runs Reconcile on the deployed service. The live records should show no mismatches and no unknown keys for the 2 wallets, the offer, and the linked, accepted request.
+
+**F-18 (found in A-5 step 1, 2026-10-10): Reconcile reports a refused wallet bind as a mismatch.**
+- **The live report:** `wallet_other_company`, company `co-test-buyer`, wallet `0xb849…D019`; records `refused`; chain "bound to another company" (tx `0xf067…`, Kings' original bind).
+- **What happened:** the operator tried to bind Kings' wallet to the buyer company. D-27 refused it, and nothing was sent (the relayer nonce is 5: bind, publish, bind, request, acceptance; still 8 ledger events). The records and the chain **agree**.
+- **The cause:** `lib/reconcile.js:85` flags `bound && !own` for `confirmed` and for every failed state (`refused`, `expired`, `reverted`). For a failed row, a wallet bound elsewhere is the reason for the failure, not a divergence. Failed rows are kept, so the finding would appear on every run.
+- **Fix shown to work** in a scratch clone of `main` `c5d35a4`: limit that branch to `confirmed`. `refused`, `expired` and `reverted` then give no finding, and `confirmed` is still a mismatch. One worker test (`test/reconcile.test.js`, "adopts a wallet bound to the company's own key and a revoked wallet, and refuses another company") asserts the false positive (a `refused` row → 1 finding) and must change to 0. The "rebound" test, with a `confirmed` row moved, still passes.
+- **Live evidence for A-5 in the same event:** a cross-company wallet grab was refused on the deployed service, with nothing sent.
+- **Fix: T18.**
 
 ---
 
