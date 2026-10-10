@@ -512,6 +512,7 @@ describe("operator chain report", () => {
       const paths = [
         ["/operator/chain", "GET"],
         ["/operator/chain/reconcile", "POST"],
+        ["/operator/chain/adopt", "POST"],
       ];
       for (const [target, method] of paths) {
         const signedOut = await signature(base, target, { method });
@@ -525,5 +526,262 @@ describe("operator chain report", () => {
       assert.equal(chain.calls.call, 0);
       assert.deepEqual(fs.readFileSync(recordsPath), before);
     });
+  });
+
+  it("adopts one chain fact, refuses a stale id, and never sends or signs", async () => {
+    const companyKey = "0x" + "ab".repeat(32);
+    let chainKey = companyKey;
+    await withChain({
+      events: [{
+        name: "WalletBound",
+        args: { companyKey, wallet: WALLET },
+        transactionHash: TX,
+        blockNumber: 3,
+        logIndex: 0,
+      }],
+      answer() {
+        return chainKey;
+      },
+    }, async ({ base, records, recordsPath, chain, operator }) => {
+      records.ensureCompanyKey(SELLER.companyId);
+      records.transact((draft) => {
+        draft.companies[SELLER.companyId].companyKey = companyKey;
+        draft.companies[SELLER.companyId].wallets = [{
+          wallet: WALLET,
+          state: "expired",
+          txHash: null,
+          error: "DeadlineExpired",
+        }];
+      });
+      const report = await postForm(base, operator.cookie, "/operator/chain/reconcile", {
+        csrf_token: operator.csrf,
+      });
+      const html = await report.text();
+      const finding = /name="finding" value="([0-9a-f]+)"/.exec(html)[1];
+      const before = fs.readFileSync(recordsPath);
+      const mtime = fs.statSync(recordsPath).mtimeMs;
+      chainKey = "0x" + "00".repeat(32);
+      const stale = await postForm(base, operator.cookie, "/operator/chain/adopt", {
+        csrf_token: operator.csrf,
+        finding,
+      });
+      assert.equal(stale.status, 303);
+      assert.equal(stale.headers.get("location"), "/operator/chain?result=refused");
+      assert.deepEqual(fs.readFileSync(recordsPath), before);
+      assert.equal(fs.statSync(recordsPath).mtimeMs, mtime);
+      assert.equal(chain.calls.submit, 0);
+      assert.equal(chain.calls.sign, 0);
+      chainKey = companyKey;
+      const adopted = await postForm(base, operator.cookie, "/operator/chain/adopt", {
+        csrf_token: operator.csrf,
+        finding,
+      });
+      assert.equal(adopted.status, 303);
+      assert.equal(adopted.headers.get("location"), "/operator/chain?result=corrected");
+      const wallet = records.walletsFor(SELLER.companyId)[0];
+      assert.equal(wallet.state, "confirmed");
+      assert.equal(wallet.txHash, TX);
+      const audit = records.view((draft) => draft.audit.filter((entry) => entry.event === "chain.corrected"));
+      assert.equal(audit.length, 1);
+      assert.equal(audit[0].actor.role, "operator");
+      assert.equal(audit[0].detail.reason, "wallet_bound");
+      assert.equal(audit[0].detail.to, "confirmed");
+      const again = await postForm(base, operator.cookie, "/operator/chain/adopt", {
+        csrf_token: operator.csrf,
+        finding,
+      });
+      assert.equal(again.headers.get("location"), "/operator/chain?result=refused");
+      const corrected = records.view((draft) => draft.audit.filter((entry) => entry.event === "chain.corrected"));
+      assert.equal(corrected.length, 1);
+      assert.equal(chain.calls.submit, 0);
+      assert.equal(chain.calls.sign, 0);
+    });
+  });
+});
+
+describe("chain adoption", () => {
+  it("corrects an offer and a request without touching marketplace facts, and refuses near misses", () => {
+    const records = openRecords(null);
+    const companyKey = records.ensureCompanyKey(SELLER.companyId).companyKey;
+    const buyerKey = records.ensureCompanyKey(BUYER.companyId).companyKey;
+    const created = records.createOffer(SELLER, { source: "manual", terms: terms() });
+    records.prepareChainOffer(SELLER.companyId, created.id, SELLER.sub);
+    records.setOfferState(SELLER.companyId, created.id, "published", SELLER.sub, TODAY);
+    const offerKey = records.chainOfferFor(created.id).offerKey;
+    const commitment = records.commitmentFor(created.id, 1);
+    records.transact((draft) => {
+      const offer = draft.offers[created.id];
+      offer.chain.confirmed = null;
+      offer.chain.actions = [{
+        id: "publish-1",
+        kind: "publish",
+        version: 1,
+        status: "expired",
+      }];
+    });
+    const offerView = {
+      companyKey,
+      version: 1,
+      stateSeq: 0,
+      state: 1,
+      expiresAt: 1,
+      commitment,
+    };
+    const events = [{
+      name: "OfferPublished",
+      args: { offerId: offerKey, companyKey, commitment, version: 1 },
+      transactionHash: TX,
+      blockNumber: 4,
+      logIndex: 0,
+    }];
+    const views = { wallets: {}, offers: { [offerKey.toLowerCase()]: offerView }, requests: {} };
+    const finding = byReason(compareRecords(snapshot(records), events, views), "offer_landed")[0];
+    const operator = { sub: "user-operator", companyId: "ops-co" };
+    const flipped = "0x" + (commitment.slice(2, 3) === "0" ? "1" : "0") + commitment.slice(3);
+    const missed = records.adoptChain(operator, finding.id, {
+      events,
+      views: { wallets: {}, offers: { [offerKey.toLowerCase()]: { ...offerView, commitment: flipped } }, requests: {} },
+    });
+    assert.equal(missed.ok, false);
+    assert.equal(records.chainOfferFor(created.id).actions[0].status, "expired");
+    const wrongCompany = records.adoptChain(operator, finding.id, {
+      events,
+      views: { wallets: {}, offers: { [offerKey.toLowerCase()]: { ...offerView, companyKey: "0x" + "44".repeat(32) } }, requests: {} },
+    });
+    assert.equal(wrongCompany.ok, false);
+    records.transact((draft) => {
+      draft.offers[created.id].chain.actions = [{
+        id: "state-1",
+        kind: "state",
+        version: 1,
+        to: "paused",
+        seq: 3,
+        status: "reverted",
+      }];
+    });
+    const seqFinding = compareRecords(snapshot(records), [], {
+      wallets: {},
+      offers: { [offerKey.toLowerCase()]: { ...offerView, state: 2, stateSeq: 9 } },
+      requests: {},
+    }).find((item) => item.reason === "offer_seq");
+    assert.equal(seqFinding.adoptable, false);
+    assert.equal(records.adoptChain(operator, seqFinding.id, {
+      events: [],
+      views: { wallets: {}, offers: { [offerKey.toLowerCase()]: { ...offerView, state: 2, stateSeq: 9 } }, requests: {} },
+    }).ok, false);
+    records.transact((draft) => {
+      draft.offers[created.id].chain.actions = [{
+        id: "publish-1",
+        kind: "publish",
+        version: 1,
+        status: "expired",
+      }];
+    });
+    const adopted = records.adoptChain(operator, finding.id, { events, views });
+    assert.equal(adopted.ok, true);
+    const offer = records.getCompanyOffer(SELLER.companyId, created.id);
+    assert.equal(offer.state, "published");
+    assert.equal(offer.chain.actions[0].status, "confirmed");
+    assert.equal(offer.chain.confirmed.version, 1);
+    assert.equal(offer.chain.confirmed.state, "published");
+
+    const request = records.createRequest(BUYER, created.id, 1, 1, TODAY);
+    const termsHash = "ab".repeat(32);
+    const salt = "0x" + "66".repeat(32);
+    const requestKey = "0x" + "55".repeat(32);
+    const requestCommitment = commitmentFromTermsHash(termsHash, salt);
+    records.transact((draft) => {
+      const row = draft.requests[request.request.id];
+      row.state = "accepted";
+      row.acceptance = { termsHash, counter: null, quantity: 1 };
+      row.fulfilment = { status: "carrier_pending", history: [] };
+      row.chain = {
+        requestKey,
+        salts: { "0": salt },
+        confirmed: { recorded: true, acceptedCounter: null, status: null, statusSeq: 0, cancelled: false },
+        actions: [{ id: "accept-1", kind: "acceptance", counter: null, status: "refused" }],
+      };
+    });
+    const requestView = {
+      offerId: offerKey,
+      buyerCompany: buyerKey,
+      version: 1,
+      statusSeq: 0,
+      status: 2,
+      termsCommitment: requestCommitment,
+    };
+    const requestEvents = [{
+      name: "AcceptanceRecorded",
+      args: { requestId: requestKey, termsCommitment: requestCommitment },
+      transactionHash: TX,
+      blockNumber: 6,
+      logIndex: 0,
+    }];
+    const requestViews = { wallets: {}, offers: {}, requests: { [requestKey]: requestView } };
+    const requestFinding = byReason(compareRecords(snapshot(records), requestEvents, requestViews), "request_landed")[0];
+    const badCommitment = "0x" + (requestCommitment.slice(2, 3) === "a" ? "b" : "a") + requestCommitment.slice(3);
+    assert.equal(records.adoptChain(operator, requestFinding.id, {
+      events: requestEvents,
+      views: { wallets: {}, offers: {}, requests: { [requestKey]: { ...requestView, termsCommitment: badCommitment } } },
+    }).ok, false);
+    assert.equal(records.adoptChain(operator, requestFinding.id, {
+      events: requestEvents,
+      views: { wallets: {}, offers: {}, requests: { [requestKey]: { ...requestView, buyerCompany: "0x" + "44".repeat(32) } } },
+    }).ok, false);
+    const recorded = records.adoptChain(operator, requestFinding.id, {
+      events: requestEvents,
+      views: requestViews,
+    });
+    assert.equal(recorded.ok, true);
+    const stored = records.view((draft) => draft.requests[request.request.id]);
+    assert.equal(stored.state, "accepted");
+    assert.equal(stored.fulfilment.status, "carrier_pending");
+    assert.equal(stored.chain.actions[0].status, "confirmed");
+    assert.equal(stored.chain.confirmed.status, "accepted");
+    const audit = records.view((draft) => draft.audit.filter((entry) => entry.event === "chain.corrected"));
+    assert.deepEqual(audit.map((entry) => entry.detail.reason), ["offer_landed", "request_landed"]);
+
+    records.transact((draft) => {
+      draft.companies[BUYER.companyId].wallets = [{
+        wallet: "0x00000000000000000000000000000000000000Cd",
+        state: "confirmed",
+        txHash: null,
+        error: null,
+      }];
+    });
+    const revoked = records.adoptChain(operator, compareRecords(snapshot(records), [{
+      name: "WalletRevoked",
+      args: { wallet: "0x00000000000000000000000000000000000000Cd", companyKey: buyerKey },
+      transactionHash: TX,
+      blockNumber: 7,
+      logIndex: 0,
+    }], {
+      wallets: { "0x00000000000000000000000000000000000000cd": "0x" + "00".repeat(32) },
+      offers: {},
+      requests: {},
+    }).find((item) => item.reason === "wallet_revoked").id, {
+      events: [{
+        name: "WalletRevoked",
+        args: { wallet: "0x00000000000000000000000000000000000000Cd", companyKey: buyerKey },
+        transactionHash: TX,
+        blockNumber: 7,
+        logIndex: 0,
+      }],
+      views: {
+        wallets: { "0x00000000000000000000000000000000000000cd": "0x" + "00".repeat(32) },
+        offers: {},
+        requests: {},
+      },
+    });
+    assert.equal(revoked.ok, true);
+    const revokedWallet = records.walletsFor(BUYER.companyId)[0];
+    assert.equal(revokedWallet.state, "revoked");
+    assert.equal(records.walletsFor(BUYER.companyId).some((entry) => entry.state === "confirmed"), false);
+    const rebound = records.beginWalletBind(BUYER.companyId, {
+      wallet: "0x00000000000000000000000000000000000000Cd",
+      boundBy: BUYER.sub,
+      deadline: 1893456000,
+    });
+    assert.equal(rebound.ok, true);
   });
 });

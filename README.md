@@ -213,3 +213,9 @@ After that, carrier statuses are signed in the order they were recorded off chai
 Decline, withdraw, a counter itself, and a dispute stay off chain. The chain stores the request key, the terms commitment, the status, and the cancellation. It does not store the price, the quantity, or either company's name.
 
 Opening the chain page does not ask the chain. Accepting from the request page is refused for an on-chain offer; both signatures happen on the chain page.
+
+## Reconciling with the chain
+
+An operator opens Chain from the operator index and runs Reconcile. That reads the ledger's events and the current wallet, offer, and request views, then shows where the records and the chain disagree. It does not write the records, and it does not send or sign anything.
+
+Adopt is offered only when the chain already holds what the records describe and the records gave up too early, or when the chain has revoked a wallet the records still treat as bound. Adopting checks the chain again, then corrects that one chain record and adds an audit entry. It does not change an offer's state, a request's state, or a fulfilment status. A revoked wallet can no longer sign.
