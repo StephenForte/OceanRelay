@@ -96,9 +96,49 @@ describe("reconciliation comparison", () => {
     assert.equal(revoked.length, 1);
     assert.equal(revoked[0].adoptable, true);
     assert.equal(revoked[0].records, "confirmed");
+    // Correction (F-18): the seller row above is refused for a wallet the chain binds to the buyer.
+    // That refusal agrees with the chain, so it is not a wallet_other_company finding.
+    assert.equal(other.length, 0);
+    assert.equal(findings.some((item) => item.kind === "unknown"), false);
+  });
+
+  it("gives no finding for a refused, expired or reverted wallet bound to another company, and one non-adoptable mismatch for a confirmed one", () => {
+    const records = openRecords(null);
+    const buyerKey = records.ensureCompanyKey(BUYER.companyId).companyKey;
+    records.ensureCompanyKey(SELLER.companyId);
+    const rows = [
+      { state: "refused", wallet: "0x0000000000000000000000000000000000000011" },
+      { state: "expired", wallet: "0x0000000000000000000000000000000000000022" },
+      { state: "reverted", wallet: "0x0000000000000000000000000000000000000033" },
+      { state: "confirmed", wallet: "0x0000000000000000000000000000000000000044" },
+    ];
+    records.transact((draft) => {
+      for (const row of rows) {
+        draft.companies[SELLER.companyId].wallets.push({
+          wallet: row.wallet,
+          state: row.state,
+          txHash: null,
+        });
+      }
+    });
+    const wallets = {};
+    for (const row of rows) wallets[row.wallet.toLowerCase()] = buyerKey;
+    const findings = compareRecords(snapshot(records), [], {
+      wallets,
+      offers: {},
+      requests: {},
+    });
+    for (const row of rows.filter((item) => item.state !== "confirmed")) {
+      const hits = findings.filter((item) => item.subject && item.subject.wallet === row.wallet);
+      assert.equal(hits.length, 0, row.state);
+    }
+    const other = byReason(findings, "wallet_other_company");
     assert.equal(other.length, 1);
     assert.equal(other[0].adoptable, false);
-    assert.equal(findings.some((item) => item.kind === "unknown"), false);
+    assert.equal(other[0].kind, "mismatch");
+    assert.equal(other[0].records, "confirmed");
+    assert.equal(other[0].subject.wallet, "0x0000000000000000000000000000000000000044");
+    assert.equal(other[0].subject.companyId, SELLER.companyId);
   });
 
   it("does not adopt a revoke once the wallet is bound again", () => {
