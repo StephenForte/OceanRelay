@@ -85,7 +85,7 @@ Status values: `ready` (prompt written, can dispatch), `blocked-on <x>`, `dispat
 | --- | --- | --- |
 | O-1 | Disconnect: connected owner clicks Disconnect; page shows Disconnected; reconnect works. | done 2026-09-29 |
 | O-2 | Revoke: revoke OceanRelay in Rate Ninja consents; wait 10+ minutes (access token lifetime); reload OceanRelay; it shows Disconnected (refresh fails with `invalid_grant`). | done 2026-09-29 (operator ran both directions) |
-| O-3 | Refused company: a Freight Forwarder/Customer account attempts Connect and sees the contract-owner-only message. | open |
+| O-3 | Refused company: a Freight Forwarder/Customer account attempts Connect and sees the contract-owner-only message. | **done 2026-10-14** (operator reported) |
 | O-4 | **Provision test accounts on Rate Ninja** now, because Phases 3–4 cannot be accepted without them: (a) contract owner with rates — exists; (b) contract owner with no rates; (c) a second contract owner at a **different company** (Phase 4 buyer); (d) a customer-company account for O-3. | done 2026-09-30 — one account (`co-test-buyer` / `testbuyer`, no rates, separate company) covers (b) and (c) |
 | O-5 | Confirm the Node version the Render service runs. Needs ≥ 20.12. | **done 2026-10-07**: Render resolves `engines >=20.12` to Node 26.10.0 / 26.11.0 (build logs, read by the planner). T13 pins it to 26.x (D-26). |
 | O-6 | **Done 2026-09-28 (operator verified /config).** Before merging PR #6: set `OCEANRELAY_RECORDS_PATH=/var/data/oceanrelay-records.json` on the Render service, the same persistent disk as the token store. The default `data/oceanrelay-records.json` is on Render's ephemeral filesystem, so offers written there would vanish on the next deploy. | done |
@@ -142,6 +142,7 @@ Tasks, in order. Each runs after the previous one merges.
 | T18 | F-18 fix: Reconcile must not report a failed wallet row (`refused`, `expired`, `reverted`) as `wallet_other_company`; only a `confirmed` row bound elsewhere is a mismatch (D-30 as clarified) | `lib/reconcile.js` (one branch), `test/reconcile.test.js` | strong | **approved 2026-10-10**: PR #67 at `12515dc` (F-18 in §6). |
 | T19 | F-19 fix: Reconcile must not list the history entry for the final move to `cancelled` as an unsigned carrier status (cancellation is checked separately) | `lib/reconcile.js` (`requestLag`), `test/reconcile.test.js` | strong | **approved 2026-10-14**: PR #71 at `18c988b` (F-19 in §6). |
 | T20 | F-20 fix: "Your offers" always shows a "Create an offer" link to `/offers/new`, not only when the list is empty | `lib/views/offers.js` (`renderList`), its tests | standard | **ready 2026-10-14**: the prompt is in the planner's chat (small task). |
+| T21 | Pilot metrics (Phase 6): a read-only `scripts/pilot-metrics.js`, run from the Render Shell. It computes the PRD Phase 6 counts and durations from the records file, with `--since` and `--exclude-company` so the deferred data cut-off can be applied later | `scripts/pilot-metrics.js`, its tests | standard | **ready 2026-10-14**: the prompt is in the planner's chat. |
 | A-5 | Phase 5 acceptance on the deployed service | operator | — | **accepted 2026-10-14** (§7: the steps, every transaction verified on chain 852). Open: T19 (PR #71), F-20. |
 
 ### Phase 5 inputs
@@ -168,7 +169,12 @@ Tasks, in order. Each runs after the previous one merges.
 - the contract-deployment process: who deploys, with which tooling, and where the address and ABI are published;
 - the wallet-signature decision: approve one small audited library, which amends D-9, or hand-write the checks.
 
-Phase 6 is operator work.
+Phase 6 is operator work. **Planner review of Phase 6 readiness, 2026-10-14** (from PRD §Phase 6 and the code):
+- **Every "Prototype complete" item has been shown on the deployed service:** A-3, A-4 and A-5.
+- **Metrics:** nothing turned the audit log into the PRD's counts. Operator decision: a Render Shell script, **T21**.
+- **Invite-only:** not enforced. Any Rate Ninja Contract Owner can connect (`server.js` checks only `companyType`). Operator decision 2026-10-14: **no allowlist for now** (no T22), revisit before invites.
+- **Test data:** test offers, requests and chain events are in production. Operator decision 2026-10-14: **defer** the cut-off or fresh-file choice until invites. T21's `--since` and `--exclude-company` keep both options open.
+- **Still open (operator):** the PRD's four pre-pilot decisions (participants and lane; extra fields; showing the carrier to shippers; cancellation and dispute terms); §5 question 3 (whether the Rate Ninja consent screen still says "Capacity Exchange", which matters for demos); confirming Render disk snapshots for `/var/data`; a `/config` `chain.state` check before each demo (ForteL2 has no uptime commitment).
 
 ---
 
