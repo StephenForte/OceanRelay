@@ -141,7 +141,7 @@ Tasks, in order. Each runs after the previous one merges.
 | T16 | Reconciliation (D-30, C-19): `chain.events` (a C-15 extension, read RPC only, 50,000-block chunks); a pure comparison of the records with the chain events and views; the operator report at `/operator/chain`; four audited adoption cases (`chain.corrected`); the `revoked` wallet state. No sending, no signing, no schema change | `lib/routes/operator-chain.js`, `lib/views/operator-chain.js`, the comparison module | strong | **approved 2026-10-10**: PR #64 at `8dc8450` (§6). Prompt: `docs/prompts/T16-reconciliation.md`. |
 | T18 | F-18 fix: Reconcile must not report a failed wallet row (`refused`, `expired`, `reverted`) as `wallet_other_company`; only a `confirmed` row bound elsewhere is a mismatch (D-30 as clarified) | `lib/reconcile.js` (one branch), `test/reconcile.test.js` | strong | **approved 2026-10-10**: PR #67 at `12515dc` (F-18 in §6). |
 | T19 | F-19 fix: Reconcile must not list the history entry for the final move to `cancelled` as an unsigned carrier status (cancellation is checked separately) | `lib/reconcile.js` (`requestLag`), `test/reconcile.test.js` | strong | **ready 2026-10-14**: the prompt is in the planner's chat (small task). |
-| A-5 | Phase 5 acceptance on the deployed service | operator | — | after T16 |
+| A-5 | Phase 5 acceptance on the deployed service | operator | — | **accepted 2026-10-14** (§7: the steps, every transaction verified on chain 852). Open: T19 (PR #71), F-20. |
 
 ### Phase 5 inputs
 
@@ -1193,7 +1193,12 @@ The operator reported every step passed:
   - `request.chain_recorded` for `carrier_pending` (actor: the buyer), `carrier_confirmed` (Kings), and `cancellation` (Kings, the second signer, who submitted it);
   - each is preceded by its off-chain entry: `offer.state`, `fulfilment.status`, `cancellation.proposed` and `cancellation.agreed`;
   - two `wallet.bound` entries (Kings, then co-test-buyer); no `chain.corrected` (nothing was adopted); the refused wrong-wallet attempt left no entry.
-- **Still to do:** step 6 (an ordinary off-chain accept).
+- **Step 6, the ordinary marketplace (2026-10-14):** the operator created an offer (through `/offers/new`, F-20), published it the normal way, requested it as co-test-buyer, and accepted it with the plain Accept button: "ok", with no wallet prompt and no chain line. The planner confirmed nothing went on chain: the relayer nonce was still 10 afterwards.
+- **A-5 verdict: Phase 5 accepted on 2026-10-14.**
+  - Every PRD Phase 5 "in scope" item was exercised on the deployed service and verified independently on chain 852: wallet binding with registrar co-signature; publish, version state (pause and resume) and expiry machinery; request, two-company acceptance, two carrier statuses and two-company cancellation; reconciliation with audited adoption.
+  - The PRD's "how you know it's done" holds: a publish and an acceptance are verifiable on chain 852; their commitments match the off-chain terms (Render Shell MATCH, twice); price, margin, company and customer are unreadable from the chain.
+  - Ledger at acceptance: 13 events; the relayer has sent 10 transactions, all status 1, for about 0.0000009 ETH in total (0.009999 ETH left).
+  - **Open, not blocking:** T19 (F-19, in flight, PR #71); F-20 (no create-offer link once offers exist; T20 when the operator chooses).
 - **F-20, found running step 6:** once a company has any offers, the app has no link to create one. `renderList` in `lib/views/offers.js` shows "Create an offer" only in the empty state, and no other page links to `/offers/new`. Workaround: open `/offers/new` directly. It is a usability gap from Phase 3/4, not a chain issue, and it does not block A-5. Fix: a "Create an offer" link on "Your offers" whether or not the list is empty. **T20** when the operator chooses.
 
 ---
@@ -1241,6 +1246,8 @@ This section holds what previously lived only in the planning conversation. It i
 - **A combined off-chain + on-chain action needs a chain-only retry.** Learned 2026-10-09; Bugbot caught it twice, on D-28's publish and on D-29's accept. When one step makes a final off-chain change and then submits to the chain, the decision must also say: (a) every check that can run before the write runs first; (b) a `refused`, `reverted` or `expired` submit leaves a chain-only retry; (c) which chain refusals cannot be retried (a T16 case). Check every future chain decision against this before dispatch.
 
 - **Acting as two companies on the deployed service:** OceanRelay signs in through Rate Ninja, whose session cookie signs the same user back in. Use a private window for the second company, with MetaMask set to **Allow in Incognito** (the same extension and accounts), and switch the MetaMask account to that company's bound wallet before signing.
+
+- **`eth_getLogs` on the sequencer is capped at 100,000 blocks** (measured 2026-10-14: `-32602 "query exceeds max block range 100000"` for 295,307 blocks). T16 reads in 50,000-block chunks (6 chunks, 13 logs at the time). The chain adds about 43,000 blocks a day, so a Reconcile makes one call per ~1.2 days of history: about 300 calls a year. If that gets slow, cache the last scanned block. Nothing needs doing now.
 
 ### Environment facts
 
