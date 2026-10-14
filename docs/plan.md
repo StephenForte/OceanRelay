@@ -140,7 +140,8 @@ Tasks, in order. Each runs after the previous one merges.
 | T17 | Requests on chain (D-29, C-18): `/chain/requests/:id` signing pages; linking with `recordRequest`; the two-signature acceptance (the proposer signs the terms, the accepter signs with "Accept and sign"), with the commitment over C-10's exact `termsHash`; signed carrier statuses in order; the two-signature cancellation; the existing accept route gated for on-chain offers; records schema 7 | `lib/routes/chain-requests.js`, `lib/views/chain-requests.js` | strongest | **approved 2026-10-09**: PR #61 at `c23f75e` (§6). Prompt: `docs/prompts/T17-requests-on-chain.md`. |
 | T16 | Reconciliation (D-30, C-19): `chain.events` (a C-15 extension, read RPC only, 50,000-block chunks); a pure comparison of the records with the chain events and views; the operator report at `/operator/chain`; four audited adoption cases (`chain.corrected`); the `revoked` wallet state. No sending, no signing, no schema change | `lib/routes/operator-chain.js`, `lib/views/operator-chain.js`, the comparison module | strong | **approved 2026-10-10**: PR #64 at `8dc8450` (§6). Prompt: `docs/prompts/T16-reconciliation.md`. |
 | T18 | F-18 fix: Reconcile must not report a failed wallet row (`refused`, `expired`, `reverted`) as `wallet_other_company`; only a `confirmed` row bound elsewhere is a mismatch (D-30 as clarified) | `lib/reconcile.js` (one branch), `test/reconcile.test.js` | strong | **approved 2026-10-10**: PR #67 at `12515dc` (F-18 in §6). |
-| T19 | F-19 fix: Reconcile must not list the history entry for the final move to `cancelled` as an unsigned carrier status (cancellation is checked separately) | `lib/reconcile.js` (`requestLag`), `test/reconcile.test.js` | strong | **ready 2026-10-14**: the prompt is in the planner's chat (small task). |
+| T19 | F-19 fix: Reconcile must not list the history entry for the final move to `cancelled` as an unsigned carrier status (cancellation is checked separately) | `lib/reconcile.js` (`requestLag`), `test/reconcile.test.js` | strong | **approved 2026-10-14**: PR #71 at `18c988b` (F-19 in §6). |
+| T20 | F-20 fix: "Your offers" always shows a "Create an offer" link to `/offers/new`, not only when the list is empty | `lib/views/offers.js` (`renderList`), its tests | standard | **ready 2026-10-14**: the prompt is in the planner's chat (small task). |
 | A-5 | Phase 5 acceptance on the deployed service | operator | — | **accepted 2026-10-14** (§7: the steps, every transaction verified on chain 852). Open: T19 (PR #71), F-20. |
 
 ### Phase 5 inputs
@@ -890,7 +891,7 @@ The operator merged #32 by accident before the planner review. The review then r
   - `npm test` 314/0 with no test changed.
   - The planner's first probe was invalid: it lacked the `getRequest` view that `requestLag` needs, and its control was green on `main` too. It was corrected before any conclusion was drawn.
 - **Information only:** it is lag, not a mismatch, so A-5's criterion (no mismatch, no unknown) holds. It would still appear for every cancelled request.
-- **Fix: T19.**
+- **Fix: T19.** Approved 2026-10-14: PR #71 at `18c988b`. The diff is exactly the one-line skip, plus 3 tests; no existing test changed. Gate (planner, scratch clone): `npm test` 317/0/0. The planner's probe on the head (with the `getRequest` view): the A-5 case gives no lag; cancelled off-chain only gives only "cancellation not signed"; an unsigned carrier status and an unsigned operator status are still reported. Semgrep and Trivy pass. Bugbot did not start for 15 minutes, then passed after a manual trigger.
 
 ---
 
@@ -1199,7 +1200,7 @@ The operator reported every step passed:
   - The PRD's "how you know it's done" holds: a publish and an acceptance are verifiable on chain 852; their commitments match the off-chain terms (Render Shell MATCH, twice); price, margin, company and customer are unreadable from the chain.
   - Ledger at acceptance: 13 events; the relayer has sent 10 transactions, all status 1, for about 0.0000009 ETH in total (0.009999 ETH left).
   - **Open, not blocking:** T19 (F-19, in flight, PR #71); F-20 (no create-offer link once offers exist; T20 when the operator chooses).
-- **F-20, found running step 6:** once a company has any offers, the app has no link to create one. `renderList` in `lib/views/offers.js` shows "Create an offer" only in the empty state, and no other page links to `/offers/new`. Workaround: open `/offers/new` directly. It is a usability gap from Phase 3/4, not a chain issue, and it does not block A-5. Fix: a "Create an offer" link on "Your offers" whether or not the list is empty. **T20** when the operator chooses.
+- **F-20, found running step 6:** once a company has any offers, the app has no link to create one. `renderList` in `lib/views/offers.js` shows "Create an offer" only in the empty state. *Corrected 2026-10-14 by the planner, whose original "no other page links to `/offers/new`" was wrong:* the signed-in home page has a **Create an offer** button (`lib/page.js:102`, asserted in `test/layout.test.js`). The gap is that "Your offers", where a seller looks, loses its create link once it has offers. Workarounds: the home page button, or `/offers/new`. It is a usability gap from Phase 3/4, not a chain issue, and it does not block A-5. Fix: a "Create an offer" link on "Your offers" whether or not the list is empty. **T20.**
 
 ---
 
