@@ -148,7 +148,8 @@ Tasks, in order. Each runs after the previous one merges.
   - **a records file written by the real records layer** (4 offers; 8 requests: accepted directly, countered and accepted, declined by the seller, declined by the buyer after a counter, withdrawn, pending, cancelled after a refused proposal, carrier-rejected), with known timestamps. Every metric equals the hand count (offers 4/3/0; requests 8/4/2/1/1; first response n 6, median 3.5h, p90 10h, not yet 2; final n 7, median 6.0h, not yet 1; completed, cancelled, rolled, disputed and rejected 1 each; counters 2/2);
   - the filters `--exclude-company` (once and twice), `--since` and `--until` match the hand count; `--json` parses; schema 6 exits 2; `OCEANRELAY_RECORDS_PATH` works;
   - the file stayed byte-identical with the same mtime;
-  - Semgrep, Trivy and Bugbot pass. |
+  - Semgrep, Trivy and Bugbot pass.
+  - **Live baseline, 2026-10-14** (the Render Shell, all data): offers 8/8/1; requests 6 (5 accepted, 1 declined); 3 counters; cancelled 1; disputed 0; 2 companies, both repeat. A read-only listing of the 6 production requests confirms every figure. |
 | A-5 | Phase 5 acceptance on the deployed service | operator | — | **accepted 2026-10-14** (§7: the steps, every transaction verified on chain 852). Open: T19 (PR #71), F-20. |
 
 ### Phase 5 inputs
@@ -1099,6 +1100,17 @@ The operator reported every step passed:
 
 `/config` showed `"operatorCount": 1` and no id. The operator chose to do F-15 (T10) before Phase 5 planning.
 
+**Correction, 2026-10-14 (planner):** the production records do not support the post-acceptance part of this report.
+- **The evidence:** a read-only listing of every request in the deployed records file (6 requests), and `ls -la /var/data`.
+  - Only A-5's request `6ec27447` has any carrier status or cancellation event (`proposed>agreed`). No request has a refused cancellation or an operator status.
+  - The three requests from that evening (`24937dd7`, `5516c381`, `4e2d87a7`) end at `accepted` or `declined` with empty fulfilment history. The audit log, live from 21:59 that day, has no `fulfilment.status` or `cancellation.*` entry before 2026-10-14.
+  - The records file was never replaced: the migration backups `pre-m2` to `pre-m7` form an unbroken chain.
+- **Most likely,** those steps ran against another server (for example a local one). The planner recorded the report without checking it against the deployed records, which is a process gap.
+- **Since proven on production:** carrier statuses and an agreed cancellation (A-5, 2026-10-14, with every transaction on chain 852).
+- **Never shown on the deployed service:** the refuse-then-dispute path, and an operator-recorded status. Both are covered by automated tests (T7, T8). Low risk, but A-4's "fully accepted" overstated what production showed.
+- **Optional, any time:** on the deployed service, propose a cancellation and refuse it (the dispute sentence should show), and record one operator status from `/operator`. Then `node scripts/pilot-metrics.js` should report `afterAcceptance.disputed` ≥ 1.
+- **Lesson for §8:** verify an operator's acceptance report against the deployed records or the audit log before writing "accepted". A-5 did this; A-3 and A-4 did not.
+
 ### 2026-10-07 — O-10: ledger deployed to chain 852 (operator), verified by the planner
 
 - **Funding.** ETH reaches chain 852 by deposit from Sepolia.
@@ -1260,6 +1272,8 @@ This section holds what previously lived only in the planning conversation. It i
 - **Acting as two companies on the deployed service:** OceanRelay signs in through Rate Ninja, whose session cookie signs the same user back in. Use a private window for the second company, with MetaMask set to **Allow in Incognito** (the same extension and accounts), and switch the MetaMask account to that company's bound wallet before signing.
 
 - **`eth_getLogs` on the sequencer is capped at 100,000 blocks** (measured 2026-10-14: `-32602 "query exceeds max block range 100000"` for 295,307 blocks). T16 reads in 50,000-block chunks (6 chunks, 13 logs at the time). The chain adds about 43,000 blocks a day, so a Reconcile makes one call per ~1.2 days of history: about 300 calls a year. If that gets slow, cache the last scanned block. Nothing needs doing now.
+
+- **Verify acceptance against production data, not reports alone.** Learned 2026-10-14: A-4's reported refuse-then-agree cancellation and operator status are not in the deployed records. Before writing "accepted", check the deployed records (a read-only Render Shell listing), the audit log, or the chain.
 
 ### Environment facts
 
