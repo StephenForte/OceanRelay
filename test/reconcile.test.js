@@ -378,6 +378,169 @@ describe("reconciliation comparison", () => {
     assert.equal(byReason(unknown, "unknown_company").length, 0);
   });
 
+  it("gives no lag when two carrier statuses and the cancellation are already confirmed on chain", () => {
+    const records = openRecords(null);
+    records.ensureCompanyKey(SELLER.companyId);
+    const buyerKey = records.ensureCompanyKey(BUYER.companyId).companyKey;
+    const created = records.createOffer(SELLER, { source: "manual", terms: terms() });
+    records.prepareChainOffer(SELLER.companyId, created.id, SELLER.sub);
+    records.setOfferState(SELLER.companyId, created.id, "published", SELLER.sub, TODAY);
+    const offerKey = records.chainOfferFor(created.id).offerKey;
+    const request = records.createRequest(BUYER, created.id, 1, 1, TODAY);
+    const requestKey = "0x" + "55".repeat(32);
+    records.transact((draft) => {
+      const row = draft.requests[request.request.id];
+      row.state = "accepted";
+      row.acceptance = { termsHash: "ab".repeat(32), counter: null, quantity: 1 };
+      row.fulfilment = {
+        status: "cancelled",
+        history: [
+          { from: "accepted", to: "carrier_pending", role: "seller" },
+          { from: "carrier_pending", to: "carrier_confirmed", role: "seller" },
+          { from: "carrier_confirmed", to: "cancelled", role: "buyer" },
+        ],
+      };
+      row.chain = {
+        requestKey,
+        salts: { "0": "0x" + "66".repeat(32) },
+        confirmed: {
+          recorded: true,
+          acceptedCounter: null,
+          status: "carrier_confirmed",
+          statusSeq: 2,
+          cancelled: true,
+        },
+        actions: [],
+      };
+    });
+    const findings = compareRecords(snapshot(records), [], {
+      wallets: {},
+      offers: {},
+      requests: {
+        [requestKey]: {
+          offerId: offerKey,
+          buyerCompany: buyerKey,
+          version: 1,
+          statusSeq: 2,
+          status: 8,
+        },
+      },
+    });
+    const mine = findings.filter((item) => item.subject.requestId === request.request.id);
+    assert.equal(mine.length, 0);
+  });
+
+  it("reports a cancellation that is only off chain once, and not as an unsigned status", () => {
+    const records = openRecords(null);
+    records.ensureCompanyKey(SELLER.companyId);
+    const buyerKey = records.ensureCompanyKey(BUYER.companyId).companyKey;
+    const created = records.createOffer(SELLER, { source: "manual", terms: terms() });
+    records.prepareChainOffer(SELLER.companyId, created.id, SELLER.sub);
+    records.setOfferState(SELLER.companyId, created.id, "published", SELLER.sub, TODAY);
+    const offerKey = records.chainOfferFor(created.id).offerKey;
+    const request = records.createRequest(BUYER, created.id, 1, 1, TODAY);
+    const requestKey = "0x" + "55".repeat(32);
+    records.transact((draft) => {
+      const row = draft.requests[request.request.id];
+      row.state = "accepted";
+      row.acceptance = { termsHash: "ab".repeat(32), counter: null, quantity: 1 };
+      row.fulfilment = {
+        status: "cancelled",
+        history: [
+          { from: "accepted", to: "carrier_pending", role: "seller" },
+          { from: "carrier_pending", to: "cancelled", role: "buyer" },
+        ],
+      };
+      row.chain = {
+        requestKey,
+        salts: { "0": "0x" + "66".repeat(32) },
+        confirmed: {
+          recorded: true,
+          acceptedCounter: null,
+          status: "carrier_pending",
+          statusSeq: 1,
+          cancelled: false,
+        },
+        actions: [],
+      };
+    });
+    const findings = compareRecords(snapshot(records), [], {
+      wallets: {},
+      offers: {},
+      requests: {
+        [requestKey]: {
+          offerId: offerKey,
+          buyerCompany: buyerKey,
+          version: 1,
+          statusSeq: 1,
+          status: 3,
+        },
+      },
+    });
+    const mine = findings.filter((item) => item.subject.requestId === request.request.id);
+    assert.equal(mine.length, 1);
+    assert.equal(mine[0].kind, "lag");
+    assert.equal(mine[0].reason, "request_status_unsigned");
+    assert.equal(mine[0].records, "cancellation not signed");
+    assert.equal(mine.some((item) => item.records === "status cancelled not signed"), false);
+  });
+
+  it("still reports one unsigned carrier status", () => {
+    const records = openRecords(null);
+    records.ensureCompanyKey(SELLER.companyId);
+    const buyerKey = records.ensureCompanyKey(BUYER.companyId).companyKey;
+    const created = records.createOffer(SELLER, { source: "manual", terms: terms() });
+    records.prepareChainOffer(SELLER.companyId, created.id, SELLER.sub);
+    records.setOfferState(SELLER.companyId, created.id, "published", SELLER.sub, TODAY);
+    const offerKey = records.chainOfferFor(created.id).offerKey;
+    const request = records.createRequest(BUYER, created.id, 1, 1, TODAY);
+    const termsHash = "ab".repeat(32);
+    const salt = "0x" + "66".repeat(32);
+    const requestKey = "0x" + "55".repeat(32);
+    const commitment = commitmentFromTermsHash(termsHash, salt);
+    records.transact((draft) => {
+      const row = draft.requests[request.request.id];
+      row.state = "accepted";
+      row.acceptance = { termsHash, counter: null, quantity: 1 };
+      row.fulfilment = {
+        status: "carrier_confirmed",
+        history: [{ from: "accepted", to: "carrier_confirmed", role: "seller" }],
+      };
+      row.chain = {
+        requestKey,
+        salts: { "0": salt },
+        confirmed: {
+          recorded: true,
+          acceptedCounter: null,
+          status: "accepted",
+          statusSeq: 0,
+          cancelled: false,
+        },
+        actions: [],
+      };
+    });
+    const findings = compareRecords(snapshot(records), [], {
+      wallets: {},
+      offers: {},
+      requests: {
+        [requestKey]: {
+          offerId: offerKey,
+          buyerCompany: buyerKey,
+          version: 1,
+          statusSeq: 0,
+          status: 2,
+          termsCommitment: commitment,
+        },
+      },
+    });
+    const mine = findings.filter((item) => item.subject.requestId === request.request.id);
+    assert.equal(mine.length, 1);
+    assert.equal(mine[0].kind, "lag");
+    assert.equal(mine[0].reason, "request_status_unsigned");
+    assert.equal(mine[0].records, "status carrier_confirmed not signed");
+    assert.equal(mine[0].adoptable, false);
+  });
+
   it("keeps a finding id stable for the same kind, subject and transaction", () => {
     const records = openRecords(null);
     const companyKey = records.ensureCompanyKey(SELLER.companyId).companyKey;
