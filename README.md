@@ -219,3 +219,35 @@ Opening the chain page does not ask the chain. Accepting from the request page i
 An operator opens Chain from the operator index and runs Reconcile. That reads the ledger's events and the current wallet, offer, and request views, then shows where the records and the chain disagree. It does not write the records, and it does not send or sign anything.
 
 Adopt is offered only when the chain already holds what the records describe and the records gave up too early, or when the chain has revoked a wallet the records still treat as bound. Adopting checks the chain again, then corrects that one chain record and adds an audit entry. It does not change an offer's state, a request's state, or a fulfilment status. A revoked wallet can no longer sign.
+
+## Pilot metrics
+
+Run this from the Render Shell, in the service directory. It reads `OCEANRELAY_RECORDS_PATH` (or `--file`) and prints the Phase 6 counts. It does not write the file, migrate it, or contact the chain.
+
+```sh
+node scripts/pilot-metrics.js
+```
+
+`npm run pilot:metrics` runs the same script. Add flags after `--`:
+
+```sh
+npm run pilot:metrics -- --since 2026-10-01 --until 2026-10-31 --exclude-company <companyId> --json
+```
+
+`--since` and `--until` are inclusive UTC dates. An offer counts by its `createdAt`, and a request counts by its `createdAt`. `--exclude-company` may be repeated. It drops every offer whose seller is that company, and every request whose buyer or seller is that company. `--json` prints one JSON object with the same numbers. A file whose `schemaVersion` is not 7 prints one line and exits 2. No matching rows prints zeros and exits 0.
+
+Range: --since and --until are inclusive UTC dates matched to offer.createdAt and request.createdAt; --exclude-company is repeatable and drops an offer whose seller is that company and a request whose buyer or seller is that company, including a request between an excluded company and any other company.
+
+Offers: created is every offer in range; published means publishedAt is set; on chain means a chain record has an action whose kind is publish and whose status is confirmed.
+
+Requests: arrived is every request in range; accepted, declined and withdrawn are the stored state; open is a stored state of pending or countered.
+
+First response: hours from createdAt to the first history entry whose to is countered, accepted or declined; the creation entry (to pending) does not count; a buyer decline of a counter is a later entry and is not this response; withdrawn is not a response; requests with no such entry are not yet; median is the middle value, or the mean of the two middle values; p90 is the nearest-rank value at ceil(0.9 times the count); hours are shown to one decimal.
+
+Final decision: hours from createdAt to the first history entry whose to is accepted, declined or withdrawn; withdrawn is final and is not a seller response; a buyer who declines a counter is this decision; requests with no such entry are not yet; median and p90 use the same rules as the first response; hours are shown to one decimal.
+
+After acceptance: only a request whose stored state is accepted; completed, cancelled and carrier rejected are the current fulfilment status; rolled means a fulfilment history entry whose to is rolled; disputed means cancellation.state is disputed, or a cancellation event is refused.
+
+Counters: requests is the number of requests with at least one counter; total is the number of counter rows.
+
+Participants: one row per company with an offer or a request in range; offers is offers that company created; made is requests where it is the buyer; received is requests where it is the seller; accepted is requests whose stored state is accepted and this company is the buyer or the seller; activity dates are the UTC day of each offer createdAt for its seller, each request createdAt for its buyer and its seller, each history at for the company that acted (actor equal to buyerSub is the buyer, any other actor is the seller), and acceptance.at for both companies when the request is accepted; again means activity on 2 or more distinct UTC days; the summary count is how many companies qualify; the name is a buyer or seller company name stored on a request, when the records have one.
