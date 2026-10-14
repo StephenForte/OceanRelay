@@ -1188,7 +1188,13 @@ The operator reported every step passed:
   - The proposal kept the status at "Carrier confirmed", with "Agree to cancel" offered, as D-20 says.
 - **Two-company sessions:** Rate Ninja's session cookie re-signs the same user, so the buyer acted from a private window with MetaMask allowed in incognito. This is in §8.
 - **Step 5, Reconcile after the cancellation:** no Mismatches and no Unknown. One "Not signed yet" item is F-19 (§6), a false report.
-- **Still to do:** step 5's audit-log check, and step 6 (an ordinary off-chain accept).
+- **Step 5, the audit log (2026-10-14, 53 entries):**
+  - `offer.chain_recorded` for the pause (`to paused`) and the resume (`to published`);
+  - `request.chain_recorded` for `carrier_pending` (actor: the buyer), `carrier_confirmed` (Kings), and `cancellation` (Kings, the second signer, who submitted it);
+  - each is preceded by its off-chain entry: `offer.state`, `fulfilment.status`, `cancellation.proposed` and `cancellation.agreed`;
+  - two `wallet.bound` entries (Kings, then co-test-buyer); no `chain.corrected` (nothing was adopted); the refused wrong-wallet attempt left no entry.
+- **Still to do:** step 6 (an ordinary off-chain accept).
+- **F-20, found running step 6:** once a company has any offers, the app has no link to create one. `renderList` in `lib/views/offers.js` shows "Create an offer" only in the empty state, and no other page links to `/offers/new`. Workaround: open `/offers/new` directly. It is a usability gap from Phase 3/4, not a chain issue, and it does not block A-5. Fix: a "Create an offer" link on "Your offers" whether or not the list is empty. **T20** when the operator chooses.
 
 ---
 
