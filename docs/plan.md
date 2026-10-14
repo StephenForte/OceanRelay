@@ -140,6 +140,7 @@ Tasks, in order. Each runs after the previous one merges.
 | T17 | Requests on chain (D-29, C-18): `/chain/requests/:id` signing pages; linking with `recordRequest`; the two-signature acceptance (the proposer signs the terms, the accepter signs with "Accept and sign"), with the commitment over C-10's exact `termsHash`; signed carrier statuses in order; the two-signature cancellation; the existing accept route gated for on-chain offers; records schema 7 | `lib/routes/chain-requests.js`, `lib/views/chain-requests.js` | strongest | **approved 2026-10-09**: PR #61 at `c23f75e` (§6). Prompt: `docs/prompts/T17-requests-on-chain.md`. |
 | T16 | Reconciliation (D-30, C-19): `chain.events` (a C-15 extension, read RPC only, 50,000-block chunks); a pure comparison of the records with the chain events and views; the operator report at `/operator/chain`; four audited adoption cases (`chain.corrected`); the `revoked` wallet state. No sending, no signing, no schema change | `lib/routes/operator-chain.js`, `lib/views/operator-chain.js`, the comparison module | strong | **approved 2026-10-10**: PR #64 at `8dc8450` (§6). Prompt: `docs/prompts/T16-reconciliation.md`. |
 | T18 | F-18 fix: Reconcile must not report a failed wallet row (`refused`, `expired`, `reverted`) as `wallet_other_company`; only a `confirmed` row bound elsewhere is a mismatch (D-30 as clarified) | `lib/reconcile.js` (one branch), `test/reconcile.test.js` | strong | **approved 2026-10-10**: PR #67 at `12515dc` (F-18 in §6). |
+| T19 | F-19 fix: Reconcile must not list the history entry for the final move to `cancelled` as an unsigned carrier status (cancellation is checked separately) | `lib/reconcile.js` (`requestLag`), `test/reconcile.test.js` | strong | **ready 2026-10-14**: the prompt is in the planner's chat (small task). |
 | A-5 | Phase 5 acceptance on the deployed service | operator | — | after T16 |
 
 ### Phase 5 inputs
@@ -879,6 +880,18 @@ The operator merged #32 by accident before the planner review. The review then r
 - **Live evidence for A-5 in the same event:** a cross-company wallet grab was refused on the deployed service, with nothing sent.
 - **Fix: T18.** Approved 2026-10-10: PR #67 at `12515dc`. The diff is exactly the one-line condition (`entry.state === "confirmed"`) plus tests; the one test that encoded F-18 is corrected and declared. Gate (planner, scratch clone): `npm test` 314/0/0. The planner's probe on the head: refused, expired and reverted give no finding; confirmed gives one non-adoptable `wallet_other_company`. Semgrep, Trivy and Bugbot pass.
 
+**F-19 (found in A-5 step 5, 2026-10-14): Reconcile lists a recorded cancellation as an unsigned status.**
+- **The live report:** under "Not signed yet", `request_status_unsigned`, request `6ec27447…`; records "status cancelled not signed"; chain "cancelled". On chain, `getRequest` shows status 8 (Cancelled), `statusSeq` 2, and the cancellation tx `0x9857…fbde` carries both companies' signatures.
+- **The cause:** C-11's `fulfilment.history` records the final move to `cancelled` as a history entry. `requestLag` (`lib/reconcile.js:273`) walks the history from `statusSeq` and treats every entry as a carrier status, including that one. Cancellation is already checked separately just below.
+- **Fix shown to work** in a scratch clone of `main` `f855a09`: in the status loop, skip an entry whose `to` is `cancelled`.
+  - The A-5 case goes from 1 false lag item to none.
+  - Control, cancelled off-chain only: the false item goes and the correct "cancellation not signed" stays.
+  - Control, an unsigned carrier status: it is still reported.
+  - `npm test` 314/0 with no test changed.
+  - The planner's first probe was invalid: it lacked the `getRequest` view that `requestLag` needs, and its control was green on `main` too. It was corrected before any conclusion was drawn.
+- **Information only:** it is lag, not a mismatch, so A-5's criterion (no mismatch, no unknown) holds. It would still appear for every cancelled request.
+- **Fix: T19.**
+
 ---
 
 ## 7. Operator reports
@@ -1158,6 +1171,25 @@ The operator reported every step passed:
   - the planner tested the command first: MATCH, MISMATCH, and the file unchanged. It deliberately prints no hash, because C-10 keeps the terms hash server-side.
 - **With 2026-10-09's publish, this meets the PRD's Phase 5 "how you know it's done"** on the live chain: a publish and an acceptance, both verifiable on chain ID 852, each committing to the off-chain terms, with price, margin, company and customer unreadable from the chain. A-5 still needs T16 (reconciliation) and the operator's own pass.
 
+### 2026-10-14 — A-5 steps 1–5 on the deployed service (operator), verified by the planner
+
+- **Step 1, Reconcile after T18:** no findings under Mismatches, Unknown on chain, or Not signed yet. F-18 is fixed on the live data.
+- **Step 2, pause and resume the on-chain offer** (Kings, wallet `0xb849…`):
+  - pause: tx `0xed4195b4f977c4b98e44f56d9bdefdc08cbc293d3863a090d2706fc47e31f422`, block 2,285,780, `setOfferState(state 2, seq 0)`;
+  - resume: tx `0x84a6b9dd0b6b0606d04a4378875c4323686f3483af3c9db9395e6d166aada845`, block 2,285,803, `setOfferState(state 1, seq 1)`;
+  - `getOffer` then shows Published, version 1, `stateSeq` 2, with the commitment unchanged.
+- **Step 3, two carrier statuses, signed by different companies:**
+  - carrier pending: tx `0xa1f059b8048bdf23250e2e58f857cf28236a91fc0cb07150c69f527e4ee4e009`, block 2,286,063, `recordStatus` 3, seq 0, signed by the buyer `0xF1A9…`;
+  - carrier confirmed: tx `0x2e1b43246509d3b54ebf78796f0d594f3f7f15a9eb963c9f7fb3026392d12732`, block 2,286,120, status 4, seq 1, signed by Kings `0xb849…`.
+- **Step 4, cancellation by agreement:**
+  - tx `0x98578694f11b1d69cdb52141f50edacec68a1d862bf125664700ec4da303fbde`, block 2,286,253, `recordCancellation`, signed by `0xF1A9…` (buyer `0xc613…`) and `0xb849…` (Kings `0x34b6…`);
+  - `getRequest`: status 8 (Cancelled), `statusSeq` 2, the acceptance commitment unchanged;
+  - relayer nonce 10.
+  - The proposal kept the status at "Carrier confirmed", with "Agree to cancel" offered, as D-20 says.
+- **Two-company sessions:** Rate Ninja's session cookie re-signs the same user, so the buyer acted from a private window with MetaMask allowed in incognito. This is in §8.
+- **Step 5, Reconcile after the cancellation:** no Mismatches and no Unknown. One "Not signed yet" item is F-19 (§6), a false report.
+- **Still to do:** step 5's audit-log check, and step 6 (an ordinary off-chain accept).
+
 ---
 
 ## 8. Planner working notes (for the next session)
@@ -1201,6 +1233,8 @@ This section holds what previously lived only in the planning conversation. It i
     list instead.
 
 - **A combined off-chain + on-chain action needs a chain-only retry.** Learned 2026-10-09; Bugbot caught it twice, on D-28's publish and on D-29's accept. When one step makes a final off-chain change and then submits to the chain, the decision must also say: (a) every check that can run before the write runs first; (b) a `refused`, `reverted` or `expired` submit leaves a chain-only retry; (c) which chain refusals cannot be retried (a T16 case). Check every future chain decision against this before dispatch.
+
+- **Acting as two companies on the deployed service:** OceanRelay signs in through Rate Ninja, whose session cookie signs the same user back in. Use a private window for the second company, with MetaMask set to **Allow in Incognito** (the same extension and accounts), and switch the MetaMask account to that company's bound wallet before signing.
 
 ### Environment facts
 
