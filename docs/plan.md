@@ -141,7 +141,7 @@ Tasks, in order. Each runs after the previous one merges.
 | T16 | Reconciliation (D-30, C-19): `chain.events` (a C-15 extension, read RPC only, 50,000-block chunks); a pure comparison of the records with the chain events and views; the operator report at `/operator/chain`; four audited adoption cases (`chain.corrected`); the `revoked` wallet state. No sending, no signing, no schema change | `lib/routes/operator-chain.js`, `lib/views/operator-chain.js`, the comparison module | strong | **approved 2026-10-10**: PR #64 at `8dc8450` (§6). Prompt: `docs/prompts/T16-reconciliation.md`. |
 | T18 | F-18 fix: Reconcile must not report a failed wallet row (`refused`, `expired`, `reverted`) as `wallet_other_company`; only a `confirmed` row bound elsewhere is a mismatch (D-30 as clarified) | `lib/reconcile.js` (one branch), `test/reconcile.test.js` | strong | **approved 2026-10-10**: PR #67 at `12515dc` (F-18 in §6). |
 | T19 | F-19 fix: Reconcile must not list the history entry for the final move to `cancelled` as an unsigned carrier status (cancellation is checked separately) | `lib/reconcile.js` (`requestLag`), `test/reconcile.test.js` | strong | **approved 2026-10-14**: PR #71 at `18c988b` (F-19 in §6). |
-| T20 | F-20 fix: "Your offers" always shows a "Create an offer" link to `/offers/new`, not only when the list is empty | `lib/views/offers.js` (`renderList`), its tests | standard | **ready 2026-10-14**: the prompt is in the planner's chat (small task). |
+| T20 | F-20 fix: "Your offers" always shows a "Create an offer" link to `/offers/new`, not only when the list is empty | `lib/views/offers.js` (`renderList`), its tests | standard | **approved 2026-10-14**: PR #74 at `a1c2c12`. The diff is one link above the list, in both states. Planner: `npm test` 319/0/0; `renderList` gives exactly 1 `/offers/new` link both empty and populated, keeps "No offers yet", and has no script. Semgrep, Trivy and Bugbot pass (Bugbot after a manual trigger). |
 | T21 | Pilot metrics (Phase 6): a read-only `scripts/pilot-metrics.js`, run from the Render Shell. It computes the PRD Phase 6 counts and durations from the records file, with `--since` and `--exclude-company` so the deferred data cut-off can be applied later | `scripts/pilot-metrics.js`, its tests | standard | **ready 2026-10-14**: the prompt is in the planner's chat. |
 | A-5 | Phase 5 acceptance on the deployed service | operator | — | **accepted 2026-10-14** (§7: the steps, every transaction verified on chain 852). Open: T19 (PR #71), F-20. |
 
@@ -174,7 +174,7 @@ Phase 6 is operator work. **Planner review of Phase 6 readiness, 2026-10-14** (f
 - **Metrics:** nothing turned the audit log into the PRD's counts. Operator decision: a Render Shell script, **T21**.
 - **Invite-only:** not enforced. Any Rate Ninja Contract Owner can connect (`server.js` checks only `companyType`). Operator decision 2026-10-14: **no allowlist for now** (no T22), revisit before invites.
 - **Test data:** test offers, requests and chain events are in production. Operator decision 2026-10-14: **defer** the cut-off or fresh-file choice until invites. T21's `--since` and `--exclude-company` keep both options open.
-- **Still open (operator):** the PRD's four pre-pilot decisions (participants and lane; extra fields; showing the carrier to shippers; cancellation and dispute terms); §5 question 3 (whether the Rate Ninja consent screen still says "Capacity Exchange", which matters for demos); confirming Render disk snapshots for `/var/data`; a `/config` `chain.state` check before each demo (ForteL2 has no uptime commitment).
+- **Still open (operator):** the PRD's four pre-pilot decisions (participants and lane; extra fields; showing the carrier to shippers; cancellation and dispute terms); confirming Render disk snapshots for `/var/data`; a `/config` `chain.state` check before each demo (ForteL2 has no uptime commitment).
 
 ---
 
@@ -198,8 +198,7 @@ Wave B has one task; no conflicts expected.
 
 1. Operator authentication for the Phase 4 operator screen (see T8). Not blocking yet.
 2. ForteL2 Sepolia RPC and contract-deployment process (Phase 5). Not blocking yet.
-3. Does the Rate Ninja client still show the name "Capacity Exchange"? The partner PRD
-   step 1 says rename it; the README says it may still carry that name. Cosmetic.
+3. ~~Does the Rate Ninja client still show the name "Capacity Exchange"?~~ **Resolved 2026-10-14:** the operator reports it no longer appears.
 
 ---
 
