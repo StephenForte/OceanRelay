@@ -867,4 +867,49 @@ describe("offer drafts", () => {
       assert.equal(Object.keys(diskOffers(recordsPath)).length, 0);
     });
   });
+
+  it("links to creating an offer when the company has none", async () => {
+    await withApp({ rates: [], sailings: [] }, async ({ base, origin, recordsPath }) => {
+      const { cookie } = await connectOwner({ base, origin });
+      const before = fs.readFileSync(recordsPath);
+      const mtime = fs.statSync(recordsPath).mtimeMs;
+      const list = await pageOf(base, cookie, "/offers");
+      assert.equal(list.response.status, 200);
+      assert.match(list.html, /<p class="empty">No offers yet<\/p>/);
+      const createLinks = list.html.match(/<a class="btn btn-secondary" href="\/offers\/new">Create an offer<\/a>/g) || [];
+      const newHrefs = list.html.match(/href="\/offers\/new"/g) || [];
+      assert.equal(createLinks.length, 1);
+      assert.equal(newHrefs.length, 1);
+      assert.deepEqual(fs.readFileSync(recordsPath), before);
+      assert.equal(fs.statSync(recordsPath).mtimeMs, mtime);
+    });
+  });
+
+  it("links to creating an offer when the company already has offers", async () => {
+    await withApp({ rates: [], sailings: [] }, async ({ base, origin, recordsPath }) => {
+      const { cookie } = await connectOwner({ base, origin });
+      const form = await pageOf(base, cookie, "/offers/new?source=manual");
+      const saved = await postForm(base, cookie, "/offers", {
+        csrf_token: form.csrf,
+        source: "manual",
+        equipment: "20D",
+        baseAmount: "10",
+        ...sellerFields({ markupValue: "0", codeShareName: "Listed Lane" }),
+      });
+      assert.equal(saved.status, 302);
+      const before = fs.readFileSync(recordsPath);
+      const mtime = fs.statSync(recordsPath).mtimeMs;
+      const list = await pageOf(base, cookie, "/offers");
+      assert.equal(list.response.status, 200);
+      assert.equal(list.html.includes("No offers yet"), false);
+      assert.match(list.html, /id="offer-list"/);
+      assert.match(list.html, /Listed Lane/);
+      const createLinks = list.html.match(/<a class="btn btn-secondary" href="\/offers\/new">Create an offer<\/a>/g) || [];
+      const newHrefs = list.html.match(/href="\/offers\/new"/g) || [];
+      assert.equal(createLinks.length, 1);
+      assert.equal(newHrefs.length, 1);
+      assert.deepEqual(fs.readFileSync(recordsPath), before);
+      assert.equal(fs.statSync(recordsPath).mtimeMs, mtime);
+    });
+  });
 });
