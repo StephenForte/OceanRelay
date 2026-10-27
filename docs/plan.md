@@ -150,6 +150,7 @@ Tasks, in order. Each runs after the previous one merges.
   - the file stayed byte-identical with the same mtime;
   - Semgrep, Trivy and Bugbot pass.
   - **Live baseline, 2026-10-14** (the Render Shell, all data): offers 8/8/1; requests 6 (5 accepted, 1 declined); 3 counters; cancelled 1; disputed 0; 2 companies, both repeat. A read-only listing of the 6 production requests confirms every figure. |
+| T23 | Node security floor (D-26 as amended 2026-10-26): `engines.node` `">=26.12.1 <27"` in `package.json` and the `package-lock.json` root, after the 2026-10-21 Node security release | `package.json` (engines only), `package-lock.json` (root engines only) | small · Cursor | **dispatched 2026-10-26**: branch `task/T23-node-floor`. Baseline `main` at `d30db6d`, `npm test` 333/0/0. After merge the operator checks that Render's build log shows Node 26.12.1 or later. |
 | A-5 | Phase 5 acceptance on the deployed service | operator | — | **accepted 2026-10-14** (§7: the steps, every transaction verified on chain 852). Open: T19 (PR #71), F-20. |
 
 ### Phase 5 inputs
