@@ -505,6 +505,7 @@ Neither the planner nor any worker handles a private key.
 
 **Rules:**
 - **Pin Node:** `engines.node` becomes `"26.x"`, so Render stops floating to the newest major.
+  - *Amended 2026-10-26 (T23):* `engines.node` becomes `">=26.12.1 <27"`. The Node security release of 2026-10-21 fixed CVE-2026-111497 (Brotli decoder out-of-bounds write, possible remote code execution), two TLS hostname-verification bypasses and a `dns.resolve` NUL-byte flaw in 26.12.1 ([advisory](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases)). Render resolves Node from this range, and `"26.x"` still allowed it to pick a 26.x below the fix; the floor rules that out. npm itself only warns on a mismatch (no `engine-strict`), so the range is not a local guard. The ceiling stays: no move to 27. The root `engines` entry in `package-lock.json`, stale at `>=20.12` since T13, is brought into line.
 - **Hashing:** all Keccak hashing uses `@noble/hashes` `keccak_256`, not Node's built-in `keccak-256`. The built-in depends on the OpenSSL build. This supersedes the sentence in D-25 allowing the built-in. Both noble packages are pinned to exact versions, and `package-lock.json` is committed.
 - **When the chain is enabled.** Chain features are on only when all four secrets are set: `OCEANRELAY_RELAYER_KEY`, `OCEANRELAY_REGISTRAR_KEY`, `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET`.
   - None set: `disabled`.
